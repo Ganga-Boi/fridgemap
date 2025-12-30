@@ -11,10 +11,9 @@
     .card { margin-top:16px; padding:16px; border:1px solid #ddd; border-radius:10px; max-width: 820px; }
     .muted { color:#666; }
     button { padding:10px 14px; cursor:pointer; }
-    input[type="file"], input[type="text"] { padding:8px; }
+    input[type="text"] { padding:8px; width: 260px; }
     ul { margin: 8px 0 0 18px; }
     li { margin-bottom: 6px; }
-    h3 { margin-top: 0; }
     .ok { color:#0a7a2f; }
     .warn { color:#b26a00; }
   </style>
@@ -23,17 +22,9 @@
 
 <h1>FridgeMap</h1>
 
-<div class="row">
-  <input id="imageInput" type="file" accept="image/*" multiple />
-  <button id="scanBtn" type="button">Scan</button>
-  <button id="resetBtn" type="button">Ny scanning</button>
-  <span id="status" class="muted"></span>
-</div>
-
-<div id="result" class="card">
+<div class="card" id="result">
   <div class="muted">
-    Upload billeder og bekræft indholdet.  
-    Opskrifter bygges ovenpå den bekræftede sandhed.
+    Indtast hvad du har i køleskabet – adskil med komma.
   </div>
 </div>
 
