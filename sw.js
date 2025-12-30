@@ -1,40 +1,23 @@
-const CACHE_NAME = 'fridgemap-v1';
-const ASSETS = [
-  '/',
-  '/index.html',
-  '/script.js',
-  '/manifest.json',
-  '/icon-192.png',
-  '/icon-512.png'
-];
+/* FridgeMap Service Worker – SAFE BASELINE
+ * - Bypasser ALLE /api/* requests
+ * - Ingen cache, ingen interception
+ */
 
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
-  );
+self.addEventListener("install", () => {
   self.skipWaiting();
 });
 
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) => {
-      return Promise.all(
-        keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
-      );
-    })
-  );
-  self.clients.claim();
+self.addEventListener("activate", (event) => {
+  event.waitUntil(self.clients.claim());
 });
 
-self.addEventListener('fetch', (event) => {
-  // Skip API calls - always fetch from network
-  if (event.request.url.includes('/api/')) {
+self.addEventListener("fetch", (event) => {
+  const url = new URL(event.request.url);
+
+  // 🔴 VIGTIGT: Bypass ALLE API-kald
+  if (url.pathname.startsWith("/api/")) {
     return;
   }
 
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      return cached || fetch(event.request);
-    })
-  );
+  // Default: lad browseren håndtere fetch normalt
 });
