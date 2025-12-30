@@ -1,5 +1,10 @@
 export const config = {
   maxDuration: 60,
+  api: {
+    bodyParser: {
+      sizeLimit: "12mb",
+    },
+  },
 };
 
 /* ============================
@@ -183,40 +188,57 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).end();
 
-  const images = req.body.images || (req.body.image ? [req.body.image] : []);
-  if (!images.length) return res.status(400).json({ error: "NO_IMAGES" });
+  try {
+    // Robust body parsing (handles string or object)
+    let body = req.body;
+    if (typeof body === "string") {
+      try { body = JSON.parse(body); } catch { body = {}; }
+    }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: "NO_API_KEY" });
+    const images = body.images || (body.image ? [body.image] : []);
+    if (!images.length) return res.status(400).json({ error: "NO_IMAGES" });
 
-  const gate = qualityGate(images);
-  if (!gate.ok) {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: "NO_API_KEY" });
+
+    const gate = qualityGate(images);
+    if (!gate.ok) {
+      return res.status(200).json({
+        ingredients_detected: [],
+        recipes: { simple: { title: "", missing: [] }, advanced: { title: "", missing: [] } },
+        shopping_list: [],
+        error_code: "NO_USABLE_IMAGES"
+      });
+    }
+
+    const rawIngredients = await analyzeImagesWithClaude(gate.images, apiKey);
+    const ingredients = mergeIngredients(rawIngredients);
+
+    if (!ingredients.length) {
+      return res.status(200).json({
+        ingredients_detected: [],
+        recipes: { simple: { title: "", missing: [] }, advanced: { title: "", missing: [] } },
+        shopping_list: [],
+        error_code: "NO_INGREDIENTS_DETECTED"
+      });
+    }
+
+    const recipes = findRecipes(ingredients);
+    const shopping = [...new Set([...(recipes.simple.missing || []), ...(recipes.advanced.missing || [])])];
+
+    return res.status(200).json({
+      ingredients_detected: ingredients,
+      recipes,
+      shopping_list: shopping
+    });
+
+  } catch (err) {
     return res.status(200).json({
       ingredients_detected: [],
       recipes: { simple: { title: "", missing: [] }, advanced: { title: "", missing: [] } },
       shopping_list: [],
-      error_code: "NO_USABLE_IMAGES"
+      error_code: "INTERNAL_ERROR",
+      debug: String(err?.message || err)
     });
   }
-
-  const rawIngredients = await analyzeImagesWithClaude(gate.images, apiKey);
-  const ingredients = mergeIngredients(rawIngredients);
-
-  if (!ingredients.length) {
-    return res.status(200).json({
-      ingredients_detected: [],
-      recipes: { simple: { title: "", missing: [] }, advanced: { title: "", missing: [] } },
-      shopping_list: [],
-      error_code: "NO_INGREDIENTS_DETECTED"
-    });
-  }
-
-  const recipes = findRecipes(ingredients);
-  const shopping = [...new Set([...(recipes.simple.missing || []), ...(recipes.advanced.missing || [])])];
-
-  return res.status(200).json({
-    ingredients_detected: ingredients,
-    recipes,
-    shopping_list: shopping
-  });
 }
