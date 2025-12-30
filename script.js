@@ -1,9 +1,11 @@
 // Elements
 const fileInput = document.getElementById("imageInput");
 const scanBtn = document.getElementById("scanBtn");
+const resetBtn = document.getElementById("resetBtn");
 const resultBox = document.getElementById("result");
+const statusEl = document.getElementById("status");
 
-// Convert file to base64
+// Convert file to base64 (DataURL)
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -13,89 +15,132 @@ function fileToBase64(file) {
   });
 }
 
-// Scan button click
-scanBtn.addEventListener("click", async () => {
-  if (!fileInput.files.length) {
-    resultBox.innerHTML = "<p>Vælg mindst ét billede.</p>";
-    return;
-  }
+function setStatus(text) {
+  statusEl.textContent = text || "";
+}
 
-  resultBox.innerHTML = "<p>Analyserer billede…</p>";
+function escapeHtml(s) {
+  return String(s || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
 
-  try {
-    // Convert files to base64
-    const images = [];
-    for (const file of fileInput.files) {
-      const base64 = await fileToBase64(file);
-      images.push(base64);
-    }
-
-    // Send til backend
-    const res = await fetch("/api/analyze", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ images })
-    });
-
-    const data = await res.json();
-    renderResult(data);
-
-  } catch (err) {
-    console.error(err);
-    resultBox.innerHTML = "<p>Kunne ikke analysere billederne. Prøv igen.</p>";
-  }
-});
-
-// Render result (matcher analyze.js output)
 function renderResult(data) {
-  const ingredients = data.ingredients_detected || [];
-  const simple = data.recipes?.simple || {};
-  const advanced = data.recipes?.advanced || {};
-  const shopping = data.shopping_list || [];
+  const recipe = data?.recipe || {};
+  const ingredients = data?.ingredients || {};
+  const priceEstimate = data?.priceEstimate || {};
 
-  if (!ingredients.length) {
+  const have = ingredients.have || [];
+  const missing = ingredients.missing || [];
+
+  if (!have.length) {
     resultBox.innerHTML = `
-      <p><strong>Ingen ingredienser fundet</strong></p>
-      <p>Prøv at tage nye billeder med bedre lys.</p>
+      <div><strong>Ingen ingredienser fundet</strong></div>
+      <div class="muted">Prøv at tage nye billeder med bedre lys.</div>
+      ${data?.debug ? `<div class="small muted">Debug: ${escapeHtml(data.debug)}</div>` : ""}
     `;
     return;
   }
 
   let html = "";
 
-  // Ingredients
-  html += "<h3>Ingredienser fundet</h3><ul>";
-  ingredients.forEach(i => {
-    html += `<li>${i}</li>`;
-  });
-  html += "</ul>";
+  html += `<h3>Fundne ingredienser</h3><ul>`;
+  have.forEach(i => html += `<li class="ok">✓ ${escapeHtml(i)}</li>`);
+  html += `</ul>`;
 
-  // Simple recipe
-  if (simple.title) {
+  if (missing.length) {
+    html += `<h3>Mangler</h3><ul>`;
+    missing.forEach(i => html += `<li class="bad">✗ ${escapeHtml(i)}</li>`);
+    html += `</ul>`;
+  }
+
+  if (recipe.title) {
     html += `
-      <h3>Simpel ret</h3>
-      <p><strong>${simple.title}</strong></p>
-      ${simple.missing?.length ? `<p>Mangler: ${simple.missing.join(", ")}</p>` : "<p>Alt på lager</p>"}
+      <h3>Forslag til ret</h3>
+      <div><strong>${escapeHtml(recipe.title)}</strong> <span class="muted">(${escapeHtml(recipe.difficulty || "nem")})</span></div>
+      <div class="muted">${escapeHtml(recipe.description || "")}</div>
     `;
   }
 
-  // Advanced recipe
-  if (advanced.title) {
+  if ((priceEstimate.min || 0) > 0 || (priceEstimate.max || 0) > 0) {
     html += `
-      <h3>Avanceret ret</h3>
-      <p><strong>${advanced.title}</strong></p>
-      ${advanced.missing?.length ? `<p>Mangler: ${advanced.missing.join(", ")}</p>` : "<p>Alt på lager</p>"}
+      <h3>Prisestimat</h3>
+      <div><strong>${escapeHtml(priceEstimate.min)}–${escapeHtml(priceEstimate.max)} ${escapeHtml(priceEstimate.currency || "DKK")}</strong></div>
+      <div class="small muted">${escapeHtml(priceEstimate.store || "")}</div>
     `;
-  }
-
-  // Shopping list
-  if (shopping.length) {
-    html += "<h3>Indkøbsliste</h3><ul>";
-    shopping.forEach(i => {
-      html += `<li>${i}</li>`;
-    });
-    html += "</ul><p><small>Målrettet REMA 1000</small></p>";
   }
 
   resultBox.innerHTML = html;
 }
+
+resetBtn.addEventListener("click", () => {
+  // Nulstil UI stabilt
+  fileInput.value = "";
+  setStatus("");
+  resultBox.innerHTML = `<div class="muted">Vælg 1–8 billeder (gerne tæt på hylderne), og tryk Scan.</div>`;
+});
+
+scanBtn.addEventListener("click", async () => {
+  try {
+    if (!fileInput.files || fileInput.files.length === 0) {
+      resultBox.innerHTML = `<div><strong>Vælg et billede først.</strong></div>`;
+      return;
+    }
+
+    setStatus("Konverterer billeder…");
+    resultBox.innerHTML = `<div class="muted">Analyserer…</div>`;
+
+    // Convert selected files to base64
+    const images = [];
+    for (const file of fileInput.files) {
+      // rimelig limit (undgå at sende 30 billeder)
+      if (images.length >= 8) break;
+      const base64 = await fileToBase64(file);
+      images.push(base64);
+    }
+
+    setStatus("Sender til /api/analyze…");
+
+    const res = await fetch("/api/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ images })
+    });
+
+    // Hvis API fejler helt, vis tydelig fejl
+    if (!res.ok) {
+      const t = await res.text().catch(() => "");
+      setStatus("");
+      resultBox.innerHTML = `<div><strong>Kunne ikke analysere billederne. Prøv igen.</strong></div><div class="small muted">${escapeHtml(t)}</div>`;
+      return;
+    }
+
+    const data = await res.json().catch(() => null);
+    setStatus("");
+
+    if (!data) {
+      resultBox.innerHTML = `<div><strong>Ugyldigt svar fra server.</strong></div>`;
+      return;
+    }
+
+    // Standardiseret: hvis backend sender error_code
+    if (data.error_code) {
+      resultBox.innerHTML = `
+        <div><strong>Kunne ikke analysere billederne. Prøv igen.</strong></div>
+        <div class="small muted">Kode: ${escapeHtml(data.error_code)}</div>
+        ${data.debug ? `<div class="small muted">Debug: ${escapeHtml(data.debug)}</div>` : ""}
+      `;
+      return;
+    }
+
+    renderResult(data);
+
+  } catch (err) {
+    console.error(err);
+    setStatus("");
+    resultBox.innerHTML = `<div><strong>Der opstod en fejl.</strong></div><div class="small muted">${escapeHtml(err?.message)}</div>`;
+  }
+});
