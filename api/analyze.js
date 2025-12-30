@@ -1,88 +1,131 @@
 export const runtime = "nodejs";
 
-const RECIPE_DATABASE = {
-  simple: [
-    { title: "Spejlæg", requires: ["æg"], missing: [] },
-    { title: "Brød med ost", requires: ["brød", "ost"], missing: [] },
-    { title: "Yoghurt med frugt", requires: ["yoghurt"], missing: [] },
-  ],
-  advanced: [
-    { title: "Æggekage med grønt", requires: ["æg"], missing: ["løg", "peberfrugt", "fløde"] },
-    { title: "Pasta carbonara", requires: ["æg", "ost"], missing: ["pasta", "bacon", "fløde"] },
-  ]
-};
+/* =========================
+   OPSKRIFTER (BASE)
+========================= */
+const RECIPES = [
+  {
+    level: "nem",
+    title: "Omelet med ost",
+    basePortions: 1,
+    requires: ["æg", "ost"],
+    extras: ["smør"],
+    basePrice: 35
+  },
+  {
+    level: "hurtig",
+    title: "Pasta med tomatsauce",
+    basePortions: 1,
+    requires: ["pasta"],
+    extras: ["tomatsauce", "løg"],
+    basePrice: 50
+  },
+  {
+    level: "avanceret",
+    title: "Kyllingesalat",
+    basePortions: 1,
+    requires: ["salat"],
+    extras: ["kylling", "dressing"],
+    basePrice: 75
+  }
+];
 
-function normalize(i){
-  const m={egg:"æg",eggs:"æg",æg:"æg",cheese:"ost",ost:"ost",bread:"brød",brød:"brød",
-  yogurt:"yoghurt",yoghurt:"yoghurt",milk:"mælk",mælk:"mælk",butter:"smør",smør:"smør",
-  onion:"løg",løg:"løg",pepper:"peberfrugt",peberfrugt:"peberfrugt",cream:"fløde",fløde:"fløde"};
-  const k=String(i||"").toLowerCase().trim(); return m[k]||k;
-}
-function findRecipes(ings){
-  const has=i=>ings.includes(i);
-  const simple=RECIPE_DATABASE.simple.find(r=>r.requires.every(has))||{title:"",missing:[]};
-  const advanced=RECIPE_DATABASE.advanced.find(r=>r.requires.every(has))||{title:"",missing:[]};
-  return {simple,advanced};
-}
-function extractBase64(s){
-  const m=String(s).match(/^data:[^;]+;base64,(.+)$/); return m?m[1]:String(s);
-}
-function detectType(s){
-  const m=String(s).match(/^data:([^;]+);base64,/); if(m) return m[1];
-  const r=String(s).slice(0,20);
-  if(r.startsWith("/9j/")) return "image/jpeg";
-  if(r.startsWith("iVBOR")) return "image/png";
-  if(r.startsWith("UklG")) return "image/webp";
-  return "image/jpeg";
-}
-function safeArr(t){
-  try{const m=String(t||"").match(/\[[\s\S]*\]/); if(!m) return [];
-  const p=JSON.parse(m[0]); return Array.isArray(p)?p:[];}catch{return[];}
-}
-function pickBest(images){
-  let b=images[0],l=extractBase64(b).length;
-  for(const i of images){const x=extractBase64(i).length; if(x>l){b=i;l=x;}}
-  return b;
+/* =========================
+   HELPERS
+========================= */
+function normalize(arr = []) {
+  return [...new Set(arr.map(x => String(x).toLowerCase().trim()))];
 }
 
-async function analyzeWithClaude(image, apiKey){
-  const data=extractBase64(image);
-  if(!data||data.length<20000) return [];
-  const res=await fetch("https://api.anthropic.com/v1/messages",{
-    method:"POST",
-    headers:{
-      "Content-Type":"application/json",
-      "x-api-key":apiKey,
-      "anthropic-version":"2024-02-01"
-    },
-    body:JSON.stringify({
-      model:"claude-sonnet-4-20250514",
-      max_tokens:500,
-      messages:[{role:"user",content:[
-        {type:"image",source:{type:"base64",media_type:detectType(image),data}},
-        {type:"text",text:"Returner KUN et JSON array med danske ingredienser. Hvis ingen, returner []"}
-      ]}]
-    })
+function pickRecipe(level, ingredients) {
+  return (
+    RECIPES.find(r =>
+      r.level === level &&
+      r.requires.every(i => ingredients.includes(i))
+    ) ||
+    RECIPES.find(r => r.level === level) // fallback pr niveau
+  );
+}
+
+function scalePrice(base, portions) {
+  return Math.round(base * portions);
+}
+
+/* =========================
+   HANDLER
+========================= */
+export default async function handler(req, res) {
+  if (req.method !== "POST") {
+    return res.status(200).json({ status: "API OK" });
+  }
+
+  let body = req.body;
+  if (typeof body === "string") {
+    try { body = JSON.parse(body); } catch {}
+  }
+
+  const portions = Math.min(Math.max(Number(body?.portions || 1), 1), 4);
+  let ingredients = [];
+
+  /* ---- Claude (valgfri / non-blocking) ---- */
+  try {
+    if (body?.images?.length && process.env.ANTHROPIC_API_KEY) {
+      const image = body.images[0];
+      const base64 = image.split(",").pop();
+
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 7000);
+
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": process.env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2024-02-01"
+        },
+        body: JSON.stringify({
+          model: "claude-3-5-sonnet-20240620",
+          max_tokens: 300,
+          messages: [{
+            role: "user",
+            content: [
+              { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64 } },
+              { type: "text", text: "Returner KUN et JSON array med danske ingredienser." }
+            ]
+          }]
+        })
+      });
+
+      const j = await r.json();
+      ingredients = normalize(JSON.parse(j?.content?.[0]?.text || "[]"));
+    }
+  } catch {
+    ingredients = [];
+  }
+
+  /* ---- Opskrifter ---- */
+  const simple = pickRecipe("nem", ingredients);
+  const fast = pickRecipe("hurtig", ingredients);
+  const advanced = pickRecipe("avanceret", ingredients);
+
+  function formatRecipe(r) {
+    return {
+      level: r.level,
+      title: r.title,
+      portions,
+      estimated_price: `${scalePrice(r.basePrice, portions)} kr`,
+      store: "REMA 1000 (estimat)",
+      shopping_list: r.extras.filter(x => !ingredients.includes(x))
+    };
+  }
+
+  return res.status(200).json({
+    ingredients_detected: ingredients,
+    recipes: {
+      simple: formatRecipe(simple),
+      fast: formatRecipe(fast),
+      advanced: formatRecipe(advanced)
+    }
   });
-  if(!res.ok) return [];
-  const j=await res.json();
-  return safeArr(j?.content?.[0]?.text);
-}
-
-export default async function handler(req,res){
-  if(req.method==="GET") return res.status(200).json({status:"API OK"});
-  if(req.method!=="POST") return res.status(405).end();
-
-  const body=typeof req.body==="string"?JSON.parse(req.body):req.body;
-  const images=body?.images||[];
-  if(!images.length) return res.status(200).json({ingredients_detected:[],recipes:{simple:{},advanced:{}},shopping_list:[]});
-
-  const apiKey=process.env.ANTHROPIC_API_KEY;
-  const best=pickBest(images);
-  const raw=await analyzeWithClaude(best, apiKey);
-  const ingredients=[...new Set(raw.map(normalize))].filter(x=>x.length>1);
-  const recipes=findRecipes(ingredients);
-  const shopping=[...new Set([...(recipes.simple.missing||[]),...(recipes.advanced.missing||[])])];
-
-  res.status(200).json({ingredients_detected:ingredients,recipes,shopping_list:shopping});
 }
