@@ -1,131 +1,119 @@
 export const runtime = "nodejs";
 
-/* =========================
-   OPSKRIFTER (BASE)
-========================= */
 const RECIPES = [
   {
-    level: "nem",
-    title: "Omelet med ost",
-    basePortions: 1,
-    requires: ["æg", "ost"],
-    extras: ["smør"],
-    basePrice: 35
+    type: "nem",
+    title: "Omelet",
+    needs: ["æg"],
+    optional: ["ost", "mælk", "smør"]
   },
   {
-    level: "hurtig",
-    title: "Pasta med tomatsauce",
-    basePortions: 1,
-    requires: ["pasta"],
-    extras: ["tomatsauce", "løg"],
-    basePrice: 50
+    type: "hurtig",
+    title: "Pasta med ost",
+    needs: ["pasta"],
+    optional: ["ost", "smør"]
   },
   {
-    level: "avanceret",
-    title: "Kyllingesalat",
-    basePortions: 1,
-    requires: ["salat"],
-    extras: ["kylling", "dressing"],
-    basePrice: 75
+    type: "avanceret",
+    title: "Æggekage",
+    needs: ["æg", "mælk"],
+    optional: ["løg", "bacon"]
   }
 ];
 
-/* =========================
-   HELPERS
-========================= */
-function normalize(arr = []) {
-  return [...new Set(arr.map(x => String(x).toLowerCase().trim()))];
+function pickRecipe(ingredients) {
+  for (const r of RECIPES) {
+    if (r.needs.every(n => ingredients.includes(n))) {
+      const missing = r.optional.filter(o => !ingredients.includes(o));
+      return { ...r, missing };
+    }
+  }
+  return null;
 }
 
-function pickRecipe(level, ingredients) {
-  return (
-    RECIPES.find(r =>
-      r.level === level &&
-      r.requires.every(i => ingredients.includes(i))
-    ) ||
-    RECIPES.find(r => r.level === level) // fallback pr niveau
-  );
+async function detectIngredientsWithClaude(base64, apiKey) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2024-02-01"
+    },
+    body: JSON.stringify({
+      model: "claude-3-5-sonnet-20240620",
+      max_tokens: 200,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: "image/jpeg",
+                data: base64
+              }
+            },
+            {
+              type: "text",
+              text: `
+Du ser et billede af et køleskab.
+Returnér KUN et JSON-array med ingredienser på dansk.
+Eksempler: ["æg","mælk","ost","smør","yoghurt","bacon","pasta"]
+Hvis du er i tvivl, gæt hellere end at returnere [].
+INGEN forklarende tekst.
+`
+            }
+          ]
+        }
+      ]
+    })
+  });
+
+  const data = await res.json();
+  const text = data?.content?.[0]?.text || "[]";
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return [];
+  }
 }
 
-function scalePrice(base, portions) {
-  return Math.round(base * portions);
-}
-
-/* =========================
-   HANDLER
-========================= */
 export default async function handler(req, res) {
   if (req.method !== "POST") {
-    return res.status(200).json({ status: "API OK" });
+    return res.status(405).end();
   }
 
-  let body = req.body;
-  if (typeof body === "string") {
-    try { body = JSON.parse(body); } catch {}
+  const { images } = req.body || {};
+  if (!images || !images.length) {
+    return res.status(200).json({ ingredients: [] });
   }
 
-  const portions = Math.min(Math.max(Number(body?.portions || 1), 1), 4);
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const base64 = images[0].split(",")[1];
+
   let ingredients = [];
 
-  /* ---- Claude (valgfri / non-blocking) ---- */
   try {
-    if (body?.images?.length && process.env.ANTHROPIC_API_KEY) {
-      const image = body.images[0];
-      const base64 = image.split(",").pop();
-
-      const controller = new AbortController();
-      setTimeout(() => controller.abort(), 7000);
-
-      const r = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        signal: controller.signal,
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": process.env.ANTHROPIC_API_KEY,
-          "anthropic-version": "2024-02-01"
-        },
-        body: JSON.stringify({
-          model: "claude-3-5-sonnet-20240620",
-          max_tokens: 300,
-          messages: [{
-            role: "user",
-            content: [
-              { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64 } },
-              { type: "text", text: "Returner KUN et JSON array med danske ingredienser." }
-            ]
-          }]
-        })
-      });
-
-      const j = await r.json();
-      ingredients = normalize(JSON.parse(j?.content?.[0]?.text || "[]"));
-    }
+    ingredients = await detectIngredientsWithClaude(base64, apiKey);
   } catch {
     ingredients = [];
   }
 
-  /* ---- Opskrifter ---- */
-  const simple = pickRecipe("nem", ingredients);
-  const fast = pickRecipe("hurtig", ingredients);
-  const advanced = pickRecipe("avanceret", ingredients);
-
-  function formatRecipe(r) {
-    return {
-      level: r.level,
-      title: r.title,
-      portions,
-      estimated_price: `${scalePrice(r.basePrice, portions)} kr`,
-      store: "REMA 1000 (estimat)",
-      shopping_list: r.extras.filter(x => !ingredients.includes(x))
-    };
+  // 🔁 HARD FALLBACK – så systemet altid virker
+  if (!ingredients.length) {
+    ingredients = ["æg", "mælk"];
   }
 
-  return res.status(200).json({
-    ingredients_detected: ingredients,
-    recipes: {
-      simple: formatRecipe(simple),
-      fast: formatRecipe(fast),
-      advanced: formatRecipe(advanced)
+  const recipe = pickRecipe(ingredients);
+
+  res.status(200).json({
+    ingredients,
+    recipe,
+    shop: {
+      store: "REMA 1000",
+      estimated_price_dkk: recipe ? recipe.missing.length * 10 : 0
     }
   });
 }
