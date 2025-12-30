@@ -1,119 +1,75 @@
-export const runtime = "nodejs";
+const fileInput = document.getElementById("imageInput");
+const scanBtn = document.getElementById("scanBtn");
+const resultBox = document.getElementById("result");
 
-const RECIPES = [
-  {
-    type: "nem",
-    title: "Omelet",
-    needs: ["æg"],
-    optional: ["ost", "mælk", "smør"]
-  },
-  {
-    type: "hurtig",
-    title: "Pasta med ost",
-    needs: ["pasta"],
-    optional: ["ost", "smør"]
-  },
-  {
-    type: "avanceret",
-    title: "Æggekage",
-    needs: ["æg", "mælk"],
-    optional: ["løg", "bacon"]
+scanBtn.addEventListener("click", async () => {
+  if (!fileInput.files.length) {
+    resultBox.innerHTML = "<p>Vælg et billede først.</p>";
+    return;
   }
-];
 
-function pickRecipe(ingredients) {
-  for (const r of RECIPES) {
-    if (r.needs.every(n => ingredients.includes(n))) {
-      const missing = r.optional.filter(o => !ingredients.includes(o));
-      return { ...r, missing };
-    }
-  }
-  return null;
-}
+  resultBox.innerHTML = "<p>Analyserer billede…</p>";
 
-async function detectIngredientsWithClaude(base64, apiKey) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2024-02-01"
-    },
-    body: JSON.stringify({
-      model: "claude-3-5-sonnet-20240620",
-      max_tokens: 200,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "image",
-              source: {
-                type: "base64",
-                media_type: "image/jpeg",
-                data: base64
-              }
-            },
-            {
-              type: "text",
-              text: `
-Du ser et billede af et køleskab.
-Returnér KUN et JSON-array med ingredienser på dansk.
-Eksempler: ["æg","mælk","ost","smør","yoghurt","bacon","pasta"]
-Hvis du er i tvivl, gæt hellere end at returnere [].
-INGEN forklarende tekst.
-`
-            }
-          ]
-        }
-      ]
-    })
-  });
-
-  const data = await res.json();
-  const text = data?.content?.[0]?.text || "[]";
+  const formData = new FormData();
+  formData.append("image", fileInput.files[0]);
 
   try {
-    return JSON.parse(text);
-  } catch {
-    return [];
+    const res = await fetch("/api/analyze", {
+      method: "POST",
+      body: formData,
+    });
+
+    const data = await res.json();
+
+    renderResult(data);
+  } catch (err) {
+    console.error(err);
+    resultBox.innerHTML = "<p>Der opstod en fejl.</p>";
   }
-}
+});
 
-export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).end();
-  }
+function renderResult(data) {
+  const ingredients = data.ingredients || [];
+  const recipe = data.recipe || null;
+  const shop = data.shop || null;
 
-  const { images } = req.body || {};
-  if (!images || !images.length) {
-    return res.status(200).json({ ingredients: [] });
-  }
-
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  const base64 = images[0].split(",")[1];
-
-  let ingredients = [];
-
-  try {
-    ingredients = await detectIngredientsWithClaude(base64, apiKey);
-  } catch {
-    ingredients = [];
-  }
-
-  // 🔁 HARD FALLBACK – så systemet altid virker
   if (!ingredients.length) {
-    ingredients = ["æg", "mælk"];
+    resultBox.innerHTML = `
+      <p><strong>Ingen ingredienser fundet</strong></p>
+      <p>Prøv at tage nye billeder med bedre lys.</p>
+    `;
+    return;
   }
 
-  const recipe = pickRecipe(ingredients);
-
-  res.status(200).json({
-    ingredients,
-    recipe,
-    shop: {
-      store: "REMA 1000",
-      estimated_price_dkk: recipe ? recipe.missing.length * 10 : 0
-    }
+  let html = `<h3>Fundne ingredienser</h3><ul>`;
+  ingredients.forEach(i => {
+    html += `<li>${i}</li>`;
   });
+  html += `</ul>`;
+
+  if (recipe) {
+    html += `
+      <h3>Forslag til ret</h3>
+      <p><strong>${recipe.title}</strong></p>
+      <p>${recipe.description}</p>
+      <h4>Sådan gør du</h4>
+      <ol>
+        ${recipe.steps.map(s => `<li>${s}</li>`).join("")}
+      </ol>
+    `;
+  }
+
+  if (shop) {
+    html += `
+      <h3>Indkøb (${shop.store})</h3>
+      <ul>
+        ${shop.items.map(
+          i => `<li>${i.name} – ${i.price} kr.</li>`
+        ).join("")}
+      </ul>
+      <p><strong>Total: ${shop.total} kr.</strong></p>
+    `;
+  }
+
+  resultBox.innerHTML = html;
 }
