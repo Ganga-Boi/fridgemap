@@ -15,37 +15,33 @@ function setStatus(text) {
 }
 
 // --------------------
-// Render manuel input (ingen forslag)
+// Render manuel indtastning
 // --------------------
 function renderManualEntry() {
   resultBox.innerHTML = `
     <h3>✍️ Indtast indholdet af dit køleskab</h3>
-    <div class="muted">
-      Billedanalyse er endnu ikke aktiv.  
-      Indtast selv de ingredienser, du kan se.
-    </div>
+    <div class="muted">Dette er den bekræftede sandhed.</div>
 
     <div style="margin-top:12px;">
-      <input id="manualInput" type="text" placeholder="Fx mælk, løg, mayonnaise" />
+      <input id="manualInput" type="text" placeholder="Fx mælk, skyr, citron" />
       <button id="addBtn">➕ Tilføj</button>
     </div>
 
     <ul id="ingredientList"></ul>
 
-    <button id="confirmBtn" style="margin-top:16px;">Bekræft indhold</button>
+    <button id="confirmBtn" style="margin-top:16px;">Se hvad jeg kan lave</button>
   `;
 
   const ingredientList = document.getElementById("ingredientList");
 
   document.getElementById("addBtn").addEventListener("click", () => {
     const input = document.getElementById("manualInput");
-    const value = input.value.trim();
+    const value = input.value.trim().toLowerCase();
     if (!value) return;
 
     const li = document.createElement("li");
     li.textContent = value;
     ingredientList.appendChild(li);
-
     input.value = "";
   });
 
@@ -54,33 +50,70 @@ function renderManualEntry() {
     ingredientList.querySelectorAll("li").forEach(li => {
       confirmed.push(li.textContent);
     });
-
-    renderConfirmedResult(confirmed);
+    renderRecipes(confirmed);
   });
 }
 
 // --------------------
-// Render bekræftet sandhed
+// OPSKRIFTSMOTOR
 // --------------------
-function renderConfirmedResult(list) {
-  if (!list.length) {
-    resultBox.innerHTML = `
-      <h3>Ingen ingredienser angivet</h3>
-      <div class="muted">Du kan tilføje ingredienser manuelt.</div>
-    `;
-    return;
+const RECIPES = [
+  {
+    title: "Citron-skyr dressing",
+    needs: ["skyr", "citron", "olie"],
+    description: "Frisk dressing til salat eller grønt."
+  },
+  {
+    title: "Citronmayonnaise",
+    needs: ["majonæse", "citron"],
+    description: "Perfekt til fisk, kartofler eller sandwich."
+  },
+  {
+    title: "Kold yoghurtsauce",
+    needs: ["mælk", "skyr", "citron"],
+    description: "Let sauce til grønt eller kød."
+  },
+  {
+    title: "Pandekager (basis)",
+    needs: ["mælk", "æg", "mel"],
+    description: "Klassiske pandekager."
+  },
+  {
+    title: "Simpel vinaigrette",
+    needs: ["olie", "citron"],
+    description: "Hurtig dressing – tilsæt evt. sennep."
   }
+];
 
-  resultBox.innerHTML = `
-    <h3>✅ Dit køleskab indeholder</h3>
-    <ul>${list.map(i => `<li>${i}</li>`).join("")}</ul>
-    <div class="muted">
-      Dette er den bekræftede sandhed.  
-      Opskrifter og mangelliste bygges ovenpå dette.
-    </div>
-  `;
+// --------------------
+// Render opskrifter
+// --------------------
+function renderRecipes(ingredients) {
+  const haveSet = new Set(ingredients);
+  let html = `<h3>🍽️ Det kan du lave</h3>`;
 
-  console.log("CONFIRMED INGREDIENTS:", list);
+  RECIPES.forEach(r => {
+    const missing = r.needs.filter(n => !haveSet.has(n));
+
+    if (missing.length === 0) {
+      html += `
+        <div style="margin-top:12px;">
+          <strong class="ok">✔️ ${r.title}</strong>
+          <div class="muted">${r.description}</div>
+        </div>
+      `;
+    } else {
+      html += `
+        <div style="margin-top:12px;">
+          <strong class="warn">🛒 ${r.title}</strong>
+          <div class="muted">${r.description}</div>
+          <div class="muted">Mangler: ${missing.join(", ")}</div>
+        </div>
+      `;
+    }
+  });
+
+  resultBox.innerHTML = html;
 }
 
 // --------------------
@@ -91,7 +124,6 @@ scanBtn.addEventListener("click", () => {
     resultBox.innerHTML = `<strong>Vælg mindst ét billede.</strong>`;
     return;
   }
-
   setStatus("Billeder modtaget");
   renderManualEntry();
 });
@@ -101,8 +133,8 @@ resetBtn.addEventListener("click", () => {
   setStatus("");
   resultBox.innerHTML = `
     <div class="muted">
-      Upload billeder af dit køleskab og tryk Scan.  
-      Billedanalyse er ikke aktiv endnu.
+      Upload billeder og bekræft indholdet.  
+      Opskrifter bygges ovenpå sandheden.
     </div>
   `;
 });
