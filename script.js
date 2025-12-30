@@ -12,8 +12,14 @@ const resultContent = document.getElementById('result-content');
 const errorMessage = document.getElementById('error-message');
 const fileInput = document.getElementById('file-input');
 const errorFileInput = document.getElementById('error-file-input');
+const previewBar = document.getElementById('preview-bar');
+const previewThumbs = document.getElementById('preview-thumbs');
+const previewCount = document.getElementById('preview-count');
+const analyzeBtn = document.getElementById('analyze-btn');
+const clearBtn = document.getElementById('clear-btn');
 
 let stream = null;
+let capturedImages = []; // Array to hold multiple images
 
 // Screen management
 function showScreen(screen) {
@@ -21,6 +27,35 @@ function showScreen(screen) {
         s.classList.remove('active');
     });
     screen.classList.add('active');
+}
+
+// Update preview bar
+function updatePreviewBar() {
+    previewThumbs.innerHTML = '';
+    
+    if (capturedImages.length === 0) {
+        previewBar.classList.remove('has-images');
+        return;
+    }
+    
+    previewBar.classList.add('has-images');
+    
+    // Show max 4 thumbnails
+    const maxThumbs = Math.min(capturedImages.length, 4);
+    for (let i = 0; i < maxThumbs; i++) {
+        const img = document.createElement('img');
+        img.src = capturedImages[i];
+        img.className = 'preview-thumb';
+        previewThumbs.appendChild(img);
+    }
+    
+    previewCount.textContent = `${capturedImages.length} billede${capturedImages.length > 1 ? 'r' : ''}`;
+}
+
+// Clear captured images
+function clearImages() {
+    capturedImages = [];
+    updatePreviewBar();
 }
 
 // Camera initialization
@@ -75,15 +110,17 @@ function enhanceImage(ctx, width, height) {
     }
 }
 
-// Analyze image (shared by capture and upload)
-async function analyzeImage(imageData) {
+// Analyze images (send to backend)
+async function analyzeImages(images) {
+    showScreen(loadingScreen);
+    
     try {
         const response = await fetch('/api/analyze', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ image: imageData })
+            body: JSON.stringify({ images: images })
         });
 
         if (!response.ok) {
@@ -91,20 +128,25 @@ async function analyzeImage(imageData) {
         }
 
         const result = await response.json();
+        
+        // Check for error code
+        if (result.error_code === 'NO_USABLE_IMAGES') {
+            errorMessage.textContent = 'Billederne var for slørede eller mørke – prøv igen.';
+            showScreen(errorScreen);
+            return;
+        }
+        
         renderResult(result);
         showScreen(resultScreen);
     } catch (err) {
         console.error('Analysis error:', err);
-        errorMessage.textContent = 'Kunne ikke analysere billedet. Prøv igen.';
+        errorMessage.textContent = 'Kunne ikke analysere billederne. Prøv igen.';
         showScreen(errorScreen);
     }
 }
 
-// Capture and process image
-async function captureImage() {
-    captureBtn.disabled = true;
-    showScreen(loadingScreen);
-
+// Capture image from camera
+function captureImage() {
     const ctx = canvas.getContext('2d');
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
@@ -113,12 +155,10 @@ async function captureImage() {
     // Enhance image for low light conditions
     enhanceImage(ctx, canvas.width, canvas.height);
 
-    // Convert to base64
+    // Convert to base64 and add to array
     const imageData = canvas.toDataURL('image/jpeg', 0.85);
-
-    await analyzeImage(imageData);
-
-    captureBtn.disabled = false;
+    capturedImages.push(imageData);
+    updatePreviewBar();
 }
 
 // Render result
@@ -185,46 +225,77 @@ function renderResult(data) {
         `;
     }
 
+    // No ingredients found
+    if (ingredients.length === 0) {
+        html = `
+            <div class="result-section">
+                <p class="section-label">Ingen ingredienser fundet</p>
+                <p style="color: var(--gray-medium);">Prøv at tage nye billeder med bedre lys.</p>
+            </div>
+        `;
+    }
+
     resultContent.innerHTML = html;
+}
+
+// Handle file upload (multiple files)
+function handleFileUpload(files) {
+    if (!files || files.length === 0) return;
+    
+    const fileArray = Array.from(files);
+    let loaded = 0;
+    
+    fileArray.forEach(file => {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            capturedImages.push(event.target.result);
+            loaded++;
+            
+            if (loaded === fileArray.length) {
+                updatePreviewBar();
+                // Auto-analyze if on error screen
+                if (errorScreen.classList.contains('active')) {
+                    analyzeImages(capturedImages);
+                    capturedImages = [];
+                }
+            }
+        };
+        reader.readAsDataURL(file);
+    });
 }
 
 // Event listeners
 captureBtn.addEventListener('click', captureImage);
-newScanBtn.addEventListener('click', () => showScreen(cameraScreen));
+
+analyzeBtn.addEventListener('click', () => {
+    if (capturedImages.length > 0) {
+        analyzeImages(capturedImages);
+        capturedImages = [];
+        updatePreviewBar();
+    }
+});
+
+clearBtn.addEventListener('click', clearImages);
+
+newScanBtn.addEventListener('click', () => {
+    clearImages();
+    showScreen(cameraScreen);
+});
+
 retryBtn.addEventListener('click', () => {
+    clearImages();
     showScreen(cameraScreen);
     if (!stream) initCamera();
 });
 
-// File upload handler
-fileInput.addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    showScreen(loadingScreen);
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-        const imageData = event.target.result;
-        await analyzeImage(imageData);
-    };
-    reader.readAsDataURL(file);
+// File upload handlers
+fileInput.addEventListener('change', (e) => {
+    handleFileUpload(e.target.files);
     fileInput.value = '';
 });
 
-// Error screen file upload handler
-errorFileInput.addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    showScreen(loadingScreen);
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-        const imageData = event.target.result;
-        await analyzeImage(imageData);
-    };
-    reader.readAsDataURL(file);
+errorFileInput.addEventListener('change', (e) => {
+    handleFileUpload(e.target.files);
     errorFileInput.value = '';
 });
 
