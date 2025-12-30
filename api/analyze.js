@@ -1,25 +1,32 @@
-/* FridgeMap Service Worker – SAFE BASELINE
- * - Bypasser ALLE /api/* requests (ingen cache, ingen interception)
- * - Cacher kun statiske filer via browserens normale mekanismer
- * - Ingen aggressive cache-strategier
- */
+export const runtime = "edge";
 
-self.addEventListener("install", (event) => {
-  self.skipWaiting();
-});
-
-self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
-});
-
-self.addEventListener("fetch", (event) => {
-  const url = new URL(event.request.url);
-
-  // 🔴 VIGTIGT: Bypass ALLE API-kald
-  if (url.pathname.startsWith("/api/")) {
-    return; // lad browseren gå direkte til netværket
-  }
-
-  // 🔹 Default: lad browseren håndtere fetch normalt
-  // (ingen custom cache her – bevidst)
-});
+export default function handler() {
+  return new Response(
+    JSON.stringify({
+      ok: true,
+      message: "API ALIVE",
+      ingredients: {
+        have: ["æg", "mælk"],
+        missing: ["salt", "peber"]
+      },
+      recipe: {
+        title: "Omelet",
+        difficulty: "nem",
+        description: "Pisk æg med mælk og steg på pande."
+      },
+      priceEstimate: {
+        min: 20,
+        max: 60,
+        currency: "DKK",
+        store: "Mock"
+      }
+    }),
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
+      }
+    }
+  );
+}
