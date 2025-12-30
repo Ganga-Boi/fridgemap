@@ -11,6 +11,7 @@ const retryBtn = document.getElementById('retry-btn');
 const resultContent = document.getElementById('result-content');
 const errorMessage = document.getElementById('error-message');
 const fileInput = document.getElementById('file-input');
+const errorFileInput = document.getElementById('error-file-input');
 
 let stream = null;
 
@@ -209,6 +210,22 @@ fileInput.addEventListener('change', async (e) => {
     };
     reader.readAsDataURL(file);
     fileInput.value = '';
+});
+
+// Error screen file upload handler
+errorFileInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    showScreen(loadingScreen);
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+        const imageData = event.target.result;
+        await analyzeImage(imageData);
+    };
+    reader.readAsDataURL(file);
+    errorFileInput.value = '';
 });
 
 // Register service worker
