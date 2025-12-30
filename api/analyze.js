@@ -1,8 +1,8 @@
 export const config = {
-  maxDuration: 30,
+  maxDuration: 60,
 };
 
-// Recipe database - simple mapping based on common ingredients
+// Recipe database
 const RECIPE_DATABASE = {
   simple: [
     { title: "Omelet med ost", requires: ["æg", "ost"], missing: [] },
@@ -63,7 +63,6 @@ function normalizeIngredient(ingredient) {
 function findRecipes(ingredients) {
   const normalizedIngredients = ingredients.map(normalizeIngredient);
   
-  // Find simple recipe (most ingredients matched, fewest missing)
   let bestSimple = null;
   let bestSimpleScore = -1;
   
@@ -83,7 +82,6 @@ function findRecipes(ingredients) {
     }
   }
   
-  // Find advanced recipe
   let bestAdvanced = null;
   let bestAdvancedScore = -1;
   
@@ -94,9 +92,6 @@ function findRecipes(ingredients) {
     
     if (matched > 0 && matched >= bestAdvancedScore) {
       bestAdvancedScore = matched;
-      const alreadyHave = recipe.requires.filter(r => 
-        normalizedIngredients.some(i => i.includes(r) || r.includes(i))
-      );
       const stillNeed = recipe.requires.filter(r => 
         !normalizedIngredients.some(i => i.includes(r) || r.includes(i))
       );
@@ -107,7 +102,6 @@ function findRecipes(ingredients) {
     }
   }
   
-  // Fallback recipes
   if (!bestSimple) {
     bestSimple = { title: "Spejlæg", missing: ["æg"] };
   }
@@ -116,6 +110,143 @@ function findRecipes(ingredients) {
   }
   
   return { simple: bestSimple, advanced: bestAdvanced };
+}
+
+// Quality gate: Score image quality based on base64 data characteristics
+function scoreImageQuality(base64Data) {
+  // Decode base64 to get raw bytes for analysis
+  const binaryString = atob(base64Data);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  
+  // Calculate basic quality metrics from JPEG data
+  let score = 50; // Base score
+  
+  // 1. File size indicator (larger usually means more detail)
+  const sizeKB = bytes.length / 1024;
+  if (sizeKB > 100) score += 15;
+  else if (sizeKB > 50) score += 10;
+  else if (sizeKB < 20) score -= 20;
+  
+  // 2. Analyze byte variance (indicates image complexity/detail)
+  let sum = 0;
+  let sumSq = 0;
+  const sampleSize = Math.min(bytes.length, 10000);
+  const step = Math.floor(bytes.length / sampleSize);
+  
+  for (let i = 0; i < bytes.length; i += step) {
+    sum += bytes[i];
+    sumSq += bytes[i] * bytes[i];
+  }
+  
+  const n = Math.floor(bytes.length / step);
+  const mean = sum / n;
+  const variance = (sumSq / n) - (mean * mean);
+  
+  // Higher variance = more detail = better quality
+  if (variance > 5000) score += 20;
+  else if (variance > 3000) score += 10;
+  else if (variance < 1000) score -= 15;
+  
+  // 3. Check for very dark or very bright images (mean byte value)
+  if (mean < 50) score -= 20; // Too dark
+  else if (mean > 200) score -= 15; // Overexposed
+  else if (mean > 80 && mean < 170) score += 10; // Good exposure
+  
+  return Math.max(0, Math.min(100, score));
+}
+
+// Quality gate: Filter and select best images
+function qualityGate(images, maxImages = 3) {
+  const scored = images.map((img, index) => {
+    const base64Data = img.replace(/^data:image\/\w+;base64,/, '');
+    const score = scoreImageQuality(base64Data);
+    return { index, image: img, score };
+  });
+  
+  // Filter out images below minimum threshold
+  const minThreshold = 40;
+  const passing = scored.filter(s => s.score >= minThreshold);
+  
+  if (passing.length === 0) {
+    return { passed: [], allFailed: true };
+  }
+  
+  // Sort by score descending and take top K
+  passing.sort((a, b) => b.score - a.score);
+  const selected = passing.slice(0, maxImages);
+  
+  return { 
+    passed: selected.map(s => s.image), 
+    allFailed: false,
+    scores: selected.map(s => s.score)
+  };
+}
+
+// Analyze single image with Claude API
+async function analyzeImage(base64Data, apiKey) {
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01'
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 500,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: 'image/jpeg',
+                data: base64Data
+              }
+            },
+            {
+              type: 'text',
+              text: 'Identificer alle fødevarer og ingredienser du kan se i dette køleskabsbillede. Returner KUN en JSON array med ingrediensnavne på dansk. Eksempel: ["æg", "mælk", "ost", "smør"]. Ingen forklaringer, kun JSON array.'
+            }
+          ]
+        }
+      ]
+    })
+  });
+  
+  if (!response.ok) {
+    throw new Error('API request failed');
+  }
+  
+  const data = await response.json();
+  const textContent = data.content?.[0]?.text || '[]';
+  
+  // Parse ingredients
+  let ingredients = [];
+  try {
+    const jsonMatch = textContent.match(/\[[\s\S]*\]/);
+    if (jsonMatch) {
+      ingredients = JSON.parse(jsonMatch[0]);
+    }
+  } catch (parseError) {
+    const words = textContent.split(/[,\n]+/).map(w => w.trim().replace(/["\[\]]/g, '')).filter(w => w.length > 1);
+    ingredients = words.slice(0, 15);
+  }
+  
+  return ingredients;
+}
+
+// Merge ingredients from multiple images
+function mergeIngredients(ingredientArrays) {
+  const allIngredients = ingredientArrays.flat();
+  const normalized = allIngredients.map(normalizeIngredient);
+  const unique = [...new Set(normalized)];
+  return unique;
 }
 
 export default async function handler(req, res) {
@@ -133,83 +264,55 @@ export default async function handler(req, res) {
   }
   
   try {
-    const { image } = req.body;
-    
-    if (!image) {
-      return res.status(400).json({ error: 'No image provided' });
+    // Support both single image and multiple images
+    let images = req.body.images || [];
+    if (req.body.image) {
+      images = [req.body.image];
     }
     
-    // Extract base64 data
-    const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
+    if (!images || images.length === 0) {
+      return res.status(400).json({ error: 'No images provided' });
+    }
     
-    // Call Claude API for image analysis
     const apiKey = process.env.ANTHROPIC_API_KEY;
-    
     if (!apiKey) {
       return res.status(500).json({ error: 'API key not configured' });
     }
     
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 500,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'image',
-                source: {
-                  type: 'base64',
-                  media_type: 'image/jpeg',
-                  data: base64Data
-                }
-              },
-              {
-                type: 'text',
-                text: 'Identificer alle fødevarer og ingredienser du kan se i dette køleskabsbillede. Returner KUN en JSON array med ingrediensnavne på dansk. Eksempel: ["æg", "mælk", "ost", "smør"]. Ingen forklaringer, kun JSON array.'
-              }
-            ]
-          }
-        ]
-      })
-    });
+    // B2/B3: Quality gate - filter and select best images
+    const qualityResult = qualityGate(images, 3);
     
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('API Error:', errorText);
-      return res.status(500).json({ error: 'Image analysis failed' });
+    // B5: Failure mode - no usable images
+    if (qualityResult.allFailed) {
+      return res.status(200).json({
+        ingredients_detected: [],
+        recipes: {
+          simple: { title: "", missing: [] },
+          advanced: { title: "", missing: [] }
+        },
+        shopping_list: [],
+        error_code: "NO_USABLE_IMAGES"
+      });
     }
     
-    const data = await response.json();
-    const textContent = data.content?.[0]?.text || '[]';
-    
-    // Parse ingredients from response
-    let ingredients = [];
-    try {
-      // Extract JSON array from response
-      const jsonMatch = textContent.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        ingredients = JSON.parse(jsonMatch[0]);
+    // Analyze each passing image
+    const ingredientResults = [];
+    for (const image of qualityResult.passed) {
+      const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
+      try {
+        const ingredients = await analyzeImage(base64Data, apiKey);
+        ingredientResults.push(ingredients);
+      } catch (err) {
+        console.error('Image analysis error:', err);
+        // Continue with other images
       }
-    } catch (parseError) {
-      console.error('Parse error:', parseError);
-      // Try to extract ingredients from text
-      const words = textContent.split(/[,\n]+/).map(w => w.trim().replace(/["\[\]]/g, '')).filter(w => w.length > 1);
-      ingredients = words.slice(0, 15);
     }
     
-    // Normalize ingredients
-    const normalizedIngredients = [...new Set(ingredients.map(normalizeIngredient))];
+    // B4: Merge logic - combine and deduplicate
+    const mergedIngredients = mergeIngredients(ingredientResults);
     
     // Find recipes
-    const recipes = findRecipes(normalizedIngredients);
+    const recipes = findRecipes(mergedIngredients);
     
     // Build shopping list
     const shoppingList = [...new Set([
@@ -217,9 +320,9 @@ export default async function handler(req, res) {
       ...(recipes.advanced.missing || [])
     ])];
     
-    // Return structured response per contract
+    // B6: Return structured response
     const result = {
-      ingredients_detected: normalizedIngredients,
+      ingredients_detected: mergedIngredients,
       recipes: {
         simple: {
           title: recipes.simple.title,
