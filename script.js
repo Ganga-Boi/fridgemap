@@ -1,31 +1,27 @@
+// --------------------
 // Elements
+// --------------------
 const fileInput = document.getElementById("imageInput");
-const peopleSelect = document.getElementById("peopleSelect");
 const scanBtn = document.getElementById("scanBtn");
 const resetBtn = document.getElementById("resetBtn");
 const resultBox = document.getElementById("result");
 const statusEl = document.getElementById("status");
 
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    if (file.size > 2 * 1024 * 1024) {
-      reject(new Error(`Billedet er for stort (${(file.size / 1024 / 1024).toFixed(1)} MB). Maks 2 MB.`));
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result;
-      if (typeof result === 'string' && result.length > 3_000_000) {
-        reject(new Error("Billedet er for stort efter konvertering."));
-        return;
-      }
-      resolve(result);
-    };
-    reader.onerror = () => reject(new Error("Kunne ikke læse billedfilen."));
-    reader.readAsDataURL(file);
-  });
-}
+// --------------------
+// MOCK vision-resultat
+// (erstattes senere af rigtig billedanalyse)
+// --------------------
+const mockVisionResult = {
+  confirmed: ["kartofler", "løg", "øl"],
+  uncertain: [
+    { label: "mayonnaise", alternatives: ["remoulade", "dressing"] },
+    { label: "sauce", alternatives: ["pesto", "chili", "soja"] }
+  ]
+};
 
+// --------------------
+// Helpers
+// --------------------
 function setStatus(text) {
   statusEl.textContent = text || "";
 }
@@ -33,138 +29,126 @@ function setStatus(text) {
 function showLoading() {
   resultBox.innerHTML = `
     <div style="text-align:center; padding:32px;">
-      <div style="width:40px; height:40px; border:4px solid #ddd; border-top:4px solid #2aa793; border-radius:50%; animation: spin 1s linear infinite; margin:0 auto;"></div>
-      <div class="muted" style="margin-top:16px;">Analyserer billeder…</div>
+      <div class="muted">Analyserer billeder…</div>
     </div>
-    <style>@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }</style>
   `;
 }
 
-function escapeHtml(s) {
-  return String(s || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+// --------------------
+// Render forslagsskærm
+// --------------------
+function renderSuggestions(data) {
+  resultBox.innerHTML = `
+    <h3>🧠 FridgeMap foreslår</h3>
+
+    <h4>✔️ Sikker</h4>
+    <ul id="confirmedList"></ul>
+
+    <h4>❓ Usikker</h4>
+    <ul id="uncertainList"></ul>
+
+    <div style="margin-top:12px;">
+      <input id="manualInput" type="text" placeholder="Tilføj ingrediens…" />
+      <button id="addManualBtn">➕ Tilføj</button>
+    </div>
+
+    <button id="confirmBtn" style="margin-top:16px;">Bekræft indhold</button>
+  `;
+
+  const confirmedList = document.getElementById("confirmedList");
+  const uncertainList = document.getElementById("uncertainList");
+
+  // Sikker
+  data.confirmed.forEach(item => {
+    const li = document.createElement("li");
+    li.textContent = item;
+    li.dataset.value = item;
+    confirmedList.appendChild(li);
+  });
+
+  // Usikker
+  data.uncertain.forEach(item => {
+    const li = document.createElement("li");
+    const label = document.createElement("span");
+    label.textContent = item.label + " ";
+
+    const select = document.createElement("select");
+    [item.label, ...item.alternatives, "Fjern"].forEach(opt => {
+      const o = document.createElement("option");
+      o.value = opt;
+      o.textContent = opt;
+      select.appendChild(o);
+    });
+
+    li.appendChild(label);
+    li.appendChild(select);
+    uncertainList.appendChild(li);
+  });
+
+  // Manuel tilføjelse
+  document.getElementById("addManualBtn").addEventListener("click", () => {
+    const input = document.getElementById("manualInput");
+    const value = input.value.trim();
+    if (!value) return;
+
+    const li = document.createElement("li");
+    li.textContent = value;
+    li.dataset.value = value;
+    confirmedList.appendChild(li);
+    input.value = "";
+  });
+
+  // Bekræft sandheden
+  document.getElementById("confirmBtn").addEventListener("click", () => {
+    const confirmed = [];
+
+    document.querySelectorAll("#confirmedList li").forEach(li => {
+      confirmed.push(li.dataset.value);
+    });
+
+    document.querySelectorAll("#uncertainList select").forEach(sel => {
+      if (sel.value !== "Fjern") {
+        confirmed.push(sel.value);
+      }
+    });
+
+    renderConfirmedResult(confirmed);
+  });
 }
 
-function renderResult(data) {
-  const recipe = data?.recipe || {};
-  const ingredients = data?.ingredients || {};
-  const priceEstimate = data?.priceEstimate || {};
+// --------------------
+// Render bekræftet sandhed
+// --------------------
+function renderConfirmedResult(list) {
+  resultBox.innerHTML = `
+    <h3>✅ Dit køleskab indeholder</h3>
+    <ul>${list.map(i => `<li>${i}</li>`).join("")}</ul>
+    <div class="muted">Dette er nu den bekræftede sandhed.</div>
+  `;
+  console.log("CONFIRMED INGREDIENTS:", list);
+}
 
-  const have = ingredients.have || [];
-  const missing = ingredients.missing || [];
-
-  if (!have.length) {
-    resultBox.innerHTML = `
-      <div><strong>🔍 Ingen ingredienser fundet</strong></div>
-      <div class="muted">Prøv billeder med bedre lys eller nærmeoptagelser.</div>
-      ${data?.debug ? `<div class="small muted">Debug: ${escapeHtml(data.debug)}</div>` : ""}
-    `;
+// --------------------
+// Events
+// --------------------
+scanBtn.addEventListener("click", () => {
+  if (!fileInput.files || fileInput.files.length === 0) {
+    resultBox.innerHTML = `<strong>Vælg mindst ét billede.</strong>`;
     return;
   }
 
-  let html = "";
+  setStatus("Forbereder…");
+  showLoading();
 
-  html += `<h3>✅ Fundne ingredienser</h3><ul>`;
-  have.forEach(i => html += `<li class="ok">${escapeHtml(i)}</li>`);
-  html += `</ul>`;
-
-  if (missing.length) {
-    html += `<h3>🛒 Mangler</h3><ul>`;
-    missing.forEach(i => html += `<li class="bad">${escapeHtml(i)}</li>`);
-    html += `</ul>`;
-  }
-
-  if (recipe.title) {
-    html += `
-      <h3>🍳 Forslag til ret</h3>
-      <div><strong>${escapeHtml(recipe.title)}</strong> <span class="muted">(${escapeHtml(recipe.difficulty || "nem")})</span></div>
-      <div class="muted">${escapeHtml(recipe.description || "")}</div>
-    `;
-  }
-
-  if ((priceEstimate.min || 0) > 0 || (priceEstimate.max || 0) > 0) {
-    html += `
-      <h3>💰 Prisestimat</h3>
-      <div><strong>${escapeHtml(priceEstimate.min)}–${escapeHtml(priceEstimate.max)} ${escapeHtml(priceEstimate.currency || "DKK")}</strong></div>
-      <div class="small muted">${escapeHtml(priceEstimate.store || "")}</div>
-    `;
-  }
-
-  resultBox.innerHTML = html;
-}
+  // Simuler analyse
+  setTimeout(() => {
+    setStatus("");
+    renderSuggestions(mockVisionResult);
+  }, 800);
+});
 
 resetBtn.addEventListener("click", () => {
   fileInput.value = "";
-  peopleSelect.value = "1";
   setStatus("");
-  resultBox.innerHTML = `<div class="muted">Vælg 1–8 billeder (gerne tæt på hylderne), og tryk Scan.</div>`;
-});
-
-scanBtn.addEventListener("click", async () => {
-  if (!fileInput.files || fileInput.files.length === 0) {
-    resultBox.innerHTML = `<div><strong>Vælg mindst ét billede.</strong></div>`;
-    return;
-  }
-
-  scanBtn.disabled = true;
-  try {
-    setStatus("Forbereder…");
-    showLoading();
-
-    const images = [];
-    for (const file of fileInput.files) {
-      if (images.length >= 8) break;
-      try {
-        const base64 = await fileToBase64(file);
-        images.push(base64);
-      } catch (err) {
-        resultBox.innerHTML = `<div><strong>❌ ${escapeHtml(err.message)}</strong></div>`;
-        scanBtn.disabled = false;
-        return;
-      }
-    }
-
-    const people = peopleSelect.value;
-    setStatus("Sender til server…");
-
-    const res = await fetch("/api/analyze", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ images, people })
-    });
-
-    if (!res.ok) {
-      const t = await res.text().catch(() => "");
-      resultBox.innerHTML = `<div><strong>Kunne ikke analysere.</strong></div><div class="small muted">${escapeHtml(t)}</div>`;
-      return;
-    }
-
-    const data = await res.json().catch(() => null);
-    if (!data) {
-      resultBox.innerHTML = `<div><strong>Ugyldigt svar.</strong></div>`;
-      return;
-    }
-
-    if (data.error_code) {
-      resultBox.innerHTML = `
-        <div><strong>Kunne ikke analysere billeder.</strong></div>
-        <div class="small muted">Kode: ${escapeHtml(data.error_code)}</div>
-        ${data.debug ? `<div class="small muted">Debug: ${escapeHtml(data.debug)}</div>` : ""}
-      `;
-      return;
-    }
-
-    renderResult(data);
-
-  } catch (err) {
-    console.error(err);
-    resultBox.innerHTML = `<div><strong>Der opstod en fejl.</strong></div><div class="small muted">${escapeHtml(err?.message)}</div>`;
-  } finally {
-    scanBtn.disabled = false;
-    setStatus("");
-  }
+  resultBox.innerHTML = `<div class="muted">Vælg 1–8 billeder af dit køleskab og tryk Scan.</div>`;
 });
