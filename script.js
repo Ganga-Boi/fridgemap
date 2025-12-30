@@ -1,13 +1,13 @@
 const resultBox = document.getElementById("result");
 
 // --------------------
-// OPSKRIFTER
+// OPSKRIFTER (simpel, stabil)
 // --------------------
 const RECIPES = [
   {
-    title: "Yoghurt med ost og citron",
-    needs: ["yoghurt", "ost", "citron"],
-    description: "Let, cremet og frisk."
+    title: "Yoghurt med citron",
+    needs: ["yoghurt", "citron"],
+    description: "Let og frisk."
   },
   {
     title: "Ostemad",
@@ -27,12 +27,21 @@ const RECIPES = [
 ];
 
 // --------------------
-// STEP 1 – INPUT
+// STEP 1 – INPUT + BILLEDER
 // --------------------
 function renderInput() {
   resultBox.innerHTML = `
-    <h3>✍️ Hvad har du?</h3>
-    <input id="ingredientInput" type="text" placeholder="fx ost, kaffe, yoghurt" />
+    <h3>Hvad har du?</h3>
+
+    <input id="ingredientInput" type="text"
+      placeholder="fx ost, kaffe, yoghurt" />
+
+    <div class="muted">
+      Du kan også uploade billeder (bruges som hjælp – ikke sandhed)
+    </div>
+
+    <input id="imageInput" type="file" multiple accept="image/*" />
+
     <button id="nextBtn">Næste</button>
   `;
 
@@ -43,19 +52,22 @@ function renderInput() {
       .map(i => i.trim().toLowerCase())
       .filter(Boolean);
 
-    if (!list.length) return;
     renderConfirm(list);
   };
 }
 
 // --------------------
-// STEP 2 – BEKRÆFT
+// STEP 2 – BEKRÆFT (SANDHED)
 // --------------------
 function renderConfirm(list) {
   resultBox.innerHTML = `
-    <h3>✅ Bekræft indhold</h3>
-    <div class="muted">Du har indtastet:</div>
-    <ul>${list.map(i => `<li>${i}</li>`).join("")}</ul>
+    <h3>Bekræft indhold</h3>
+    <div class="muted">Dette bliver den bekræftede sandhed:</div>
+
+    <ul>
+      ${list.map(i => `<li>${i}</li>`).join("")}
+    </ul>
+
     <button id="confirmBtn">Ja, det er korrekt</button>
     <button id="backBtn">Ret</button>
   `;
@@ -70,31 +82,33 @@ function renderConfirm(list) {
 }
 
 // --------------------
-// STEP 3 – OPSKRIFTER
+// STEP 3 – OPSKRIFTER (DESIGN UÆNDRET)
 // --------------------
 function renderRecipes(ingredients) {
-  const have = new Set(ingredients);
-  let html = `<h3>🍽️ Hvad du kan lave</h3>`;
+  const haveSet = new Set(ingredients);
+
+  let html = `
+    <div class="have-line">
+      Du har valgt: ${ingredients.join(", ")}
+    </div>
+
+    <h3>Hvad du kan lave</h3>
+  `;
 
   RECIPES.forEach(r => {
-    const missing = r.needs.filter(n => !have.has(n));
+    const missing = r.needs.filter(n => !haveSet.has(n));
 
-    if (missing.length === 0) {
-      html += `
-        <div style="margin-top:12px;">
-          <strong class="ok">✔️ ${r.title}</strong>
-          <div class="muted">${r.description}</div>
-        </div>
-      `;
-    } else {
-      html += `
-        <div style="margin-top:12px;">
-          <strong class="warn">🛒 ${r.title}</strong>
-          <div class="muted">${r.description}</div>
-          <div class="muted">Mangler: ${missing.join(", ")}</div>
-        </div>
-      `;
-    }
+    html += `
+      <div class="recipe">
+        <strong>${r.title}</strong><br/>
+        <span class="muted">${r.description}</span><br/>
+        ${
+          missing.length
+            ? `<span class="missing">Mangler: ${missing.join(", ")}</span>`
+            : `<span style="color:#0a7a2f;">Du har det hele</span>`
+        }
+      </div>
+    `;
   });
 
   resultBox.innerHTML = html;
