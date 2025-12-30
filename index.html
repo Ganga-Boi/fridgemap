@@ -87,6 +87,7 @@
             padding: var(--spacing-xl);
             display: flex;
             justify-content: center;
+            align-items: center;
             background: linear-gradient(transparent, rgba(0,0,0,0.6));
         }
 
@@ -128,6 +129,60 @@
             font-size: 20px;
             color: var(--primary);
             font-weight: bold;
+        }
+
+        /* Preview bar for multiple images */
+        .preview-bar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            padding: var(--spacing-sm);
+            background: rgba(0,0,0,0.6);
+            display: none;
+            gap: var(--spacing-xs);
+            align-items: center;
+        }
+
+        .preview-bar.has-images {
+            display: flex;
+        }
+
+        .preview-thumb {
+            width: 48px;
+            height: 48px;
+            border-radius: 6px;
+            object-fit: cover;
+            border: 2px solid var(--white);
+        }
+
+        .preview-count {
+            color: var(--white);
+            font-size: 14px;
+            margin-left: auto;
+            padding-right: var(--spacing-sm);
+        }
+
+        #analyze-btn {
+            padding: var(--spacing-xs) var(--spacing-md);
+            background: var(--primary);
+            color: var(--white);
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        #clear-btn {
+            padding: var(--spacing-xs) var(--spacing-sm);
+            background: transparent;
+            color: var(--white);
+            border: 1px solid var(--white);
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            margin-left: var(--spacing-xs);
         }
 
         /* Loading Screen */
@@ -320,13 +375,19 @@
 <body>
     <!-- Camera Screen -->
     <div id="camera-screen" class="screen active">
+        <div class="preview-bar" id="preview-bar">
+            <div id="preview-thumbs"></div>
+            <span class="preview-count" id="preview-count"></span>
+            <button id="analyze-btn">Analysér</button>
+            <button id="clear-btn">Ryd</button>
+        </div>
         <div id="video-container">
             <video id="video" autoplay playsinline></video>
         </div>
         <canvas id="canvas-hidden"></canvas>
         <div class="camera-controls">
-            <label id="upload-btn" aria-label="Upload billede">
-                <input type="file" id="file-input" accept="image/*" hidden>
+            <label id="upload-btn" aria-label="Upload billeder">
+                <input type="file" id="file-input" accept="image/*" multiple hidden>
             </label>
             <button id="capture-btn" aria-label="Tag billede"></button>
         </div>
@@ -352,8 +413,8 @@
         <p class="error-message" id="error-message">Kunne ikke analysere billedet.</p>
         <button id="retry-btn">Prøv igen</button>
         <label id="error-upload-btn">
-            Upload billede
-            <input type="file" id="error-file-input" accept="image/*" hidden>
+            Upload billeder
+            <input type="file" id="error-file-input" accept="image/*" multiple hidden>
         </label>
     </div>
 
