@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/analyze.edge.js": {
+      "runtime": "edge"
+    }
+  }
+}
