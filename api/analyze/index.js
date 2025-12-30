@@ -3,28 +3,19 @@ export default function handler(req, res) {
     return res.status(405).json({ error: "METHOD_NOT_ALLOWED" });
   }
 
-  const { images = [], people = "1" } = req.body || {};
-
-  const have =
-    images.length === 1
-      ? ["mælk", "æg"]
-      : ["æg", "gulerod", "kylling", "kartofler"];
-
-  res.status(200).json({
-    ingredients: {
-      have,
-      missing: ["salt", "peber"]
-    },
+  // Ingen billedanalyse endnu → ingen gæt
+  return res.status(200).json({
+    ingredients: { have: [], missing: [] },
     recipe: {
-      title: people === "4+" ? "Omelet til 4 personer" : "Omelet",
-      difficulty: "nem",
-      description: "Pisk æg med mælk og steg på pande."
+      title: "Analyse ikke aktiv",
+      difficulty: "",
+      description:
+        "Billedgenkendelse er ikke slået til endnu. Dette er en teknisk MVP uden gæt."
     },
-    priceEstimate: {
-      min: 20,
-      max: people === "4+" ? 120 : 60,
-      currency: "DKK",
-      store: "Mock"
+    priceEstimate: { min: 0, max: 0, currency: "DKK", store: "" },
+    meta: {
+      mode: "no-guess",
+      note: "Mock slukket. Klar til rigtig billedanalyse."
     }
   });
 }
