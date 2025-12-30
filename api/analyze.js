@@ -8,14 +8,15 @@ export const config = {
 };
 
 /* ============================
-   RECIPE DATABASE (RULE-BASED)
+   RECIPE DATABASE
 ============================ */
 const RECIPE_DATABASE = {
   simple: [
     { title: "Omelet med ost", requires: ["æg", "ost"] },
     { title: "Spejlæg", requires: ["æg"] },
     { title: "Brød med ost", requires: ["brød", "ost"] },
-    { title: "Yoghurt", requires: ["yoghurt"] }
+    { title: "Yoghurt med frugt", requires: ["yoghurt"] },
+    { title: "Rugbrød med smør", requires: ["brød", "smør"] }
   ],
   advanced: [
     { title: "Æggekage med grønt", requires: ["æg"], missing: ["løg", "peberfrugt", "fløde"] },
@@ -25,7 +26,7 @@ const RECIPE_DATABASE = {
 };
 
 /* ============================
-   INGREDIENT NORMALIZATION
+   NORMALIZATION
 ============================ */
 function normalizeIngredient(value) {
   const map = {
@@ -41,66 +42,48 @@ function normalizeIngredient(value) {
     tomato: "tomat", tomat: "tomat",
     lettuce: "salat", salat: "salat",
     chicken: "kylling", kylling: "kylling",
-    carrot: "gulerod", gulerod: "gulerod"
+    carrot: "gulerod", gulerod: "gulerod",
+    cream: "fløde", fløde: "fløde",
+    pepper: "peberfrugt", peberfrugt: "peberfrugt",
+    mayonnaise: "mayonnaise", mayo: "mayonnaise",
+    kartofler: "kartoffel", kartoffel: "kartoffel"
   };
 
-  const key = value.toLowerCase().trim();
+  const key = String(value || "").toLowerCase().trim();
   return map[key] || key;
 }
 
 /* ============================
-   IMAGE QUALITY GATE
+   BASE64 HELPERS
 ============================ */
-function scoreImageQuality(base64) {
-  const buffer = Buffer.from(base64, "base64");
-  const bytes = new Uint8Array(buffer);
-
-  let score = 50;
-
-  const sizeKB = bytes.length / 1024;
-  if (sizeKB > 120) score += 15;
-  if (sizeKB < 25) score -= 25;
-
-  let sum = 0;
-  let sumSq = 0;
-  const step = Math.max(1, Math.floor(bytes.length / 8000));
-
-  for (let i = 0; i < bytes.length; i += step) {
-    sum += bytes[i];
-    sumSq += bytes[i] * bytes[i];
-  }
-
-  const n = Math.floor(bytes.length / step);
-  const mean = sum / n;
-  const variance = sumSq / n - mean * mean;
-
-  if (variance > 4000) score += 20;
-  else if (variance < 1200) score -= 20;
-
-  if (mean < 50 || mean > 200) score -= 20;
-
-  return Math.max(0, Math.min(100, score));
+function extractBase64(dataUrlOrBase64) {
+  const match = String(dataUrlOrBase64).match(/^data:[^;]+;base64,(.+)$/);
+  return match ? match[1] : String(dataUrlOrBase64);
 }
 
-function qualityGate(images, maxImages = 3) {
-  const scored = images.map(img => {
-    const base64 = img.replace(/^data:image\/\w+;base64,/, "");
-    return { image: img, score: scoreImageQuality(base64) };
-  });
+function detectMediaType(dataUrlOrBase64) {
+  const s = String(dataUrlOrBase64);
 
-  const passed = scored.filter(i => i.score >= 40);
-  if (!passed.length) return { ok: false };
+  // Data URL prefix
+  const m = s.match(/^data:([^;]+);base64,/);
+  if (m) return m[1];
 
-  passed.sort((a, b) => b.score - a.score);
-  return { ok: true, images: passed.slice(0, maxImages).map(i => i.image) };
+  // Raw base64 signatures (first bytes)
+  const raw = s.slice(0, 20);
+  if (raw.startsWith("/9j/")) return "image/jpeg";
+  if (raw.startsWith("iVBOR")) return "image/png";
+  if (raw.startsWith("R0lG")) return "image/gif";
+  if (raw.startsWith("UklG")) return "image/webp";
+
+  return "image/jpeg";
 }
 
 /* ============================
-   SAFE PARSE
+   SAFE PARSE (JSON ARRAY)
 ============================ */
-function safeParseIngredients(text) {
+function safeParseArray(text) {
   try {
-    const match = text.match(/\[[^\]]*\]/);
+    const match = String(text || "").match(/\[[\s\S]*\]/);
     if (!match) return [];
     const parsed = JSON.parse(match[0]);
     return Array.isArray(parsed) ? parsed : [];
@@ -110,52 +93,23 @@ function safeParseIngredients(text) {
 }
 
 /* ============================
-   CLAUDE IMAGE ANALYSIS
+   LOCAL IMAGE PICKER (CONTRACT-TRO)
+   - bruger må sende flere billeder
+   - backend vælger ÉT billede deterministisk
 ============================ */
-async function analyzeImagesWithClaude(images, apiKey) {
-  const content = images.map(img => ({
-    type: "image",
-    source: {
-      type: "base64",
-      media_type: "image/jpeg",
-      data: img.replace(/^data:image\/\w+;base64,/, "")
+function pickBestImage(images) {
+  // Robust og enkel: vælg det største base64 payload (ofte mest detalje)
+  let best = images[0];
+  let bestLen = extractBase64(best).length;
+
+  for (const img of images) {
+    const len = extractBase64(img).length;
+    if (len > bestLen) {
+      best = img;
+      bestLen = len;
     }
-  }));
-
-  content.push({
-    type: "text",
-    text: `
-Identificer alle fødevarer og ingredienser du kan se.
-Returner KUN et gyldigt JSON array med danske ingrediensnavne.
-Ingen tekst før eller efter.
-Hvis intet kan identificeres, returner [].
-`
-  });
-
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01"
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 500,
-      messages: [{ role: "user", content }]
-    })
-  });
-
-  const data = await response.json();
-  const text = data.content?.[0]?.text || "[]";
-  return safeParseIngredients(text);
-}
-
-/* ============================
-   MERGE + DEDUP
-============================ */
-function mergeIngredients(list) {
-  return [...new Set(list.map(normalizeIngredient))];
+  }
+  return best;
 }
 
 /* ============================
@@ -164,17 +118,77 @@ function mergeIngredients(list) {
 function findRecipes(ingredients) {
   const has = i => ingredients.includes(i);
 
-  const simple =
-    RECIPE_DATABASE.simple.find(r =>
-      r.requires.every(has)
-    ) || { title: "", missing: [] };
+  const simple = RECIPE_DATABASE.simple.find(r => r.requires.every(has))
+    || { title: "", missing: [] };
 
-  const advanced =
-    RECIPE_DATABASE.advanced.find(r =>
-      r.requires.every(has)
-    ) || { title: "", missing: [] };
+  const advanced = RECIPE_DATABASE.advanced.find(r => r.requires.every(has))
+    || { title: "", missing: [] };
 
   return { simple, advanced };
+}
+
+/* ============================
+   CLAUDE CALL (ÉT billede pr request)
+============================ */
+async function analyzeSingleImageWithClaude({ image, apiKey }) {
+  const mediaType = detectMediaType(image);
+  const base64Data = extractBase64(image);
+
+  // meget vigtig sanity check
+  if (!base64Data || base64Data.length < 20000) {
+    return { ok: false, error_code: "IMAGE_TOO_SMALL" };
+  }
+
+  const content = [
+    {
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: mediaType,
+        data: base64Data
+      }
+    },
+    {
+      type: "text",
+      text:
+`Identificer alle fødevarer og ingredienser du kan se i dette køleskabsbillede.
+
+Returner KUN et gyldigt JSON array med danske ingrediensnavne.
+Ingen tekst før eller efter.
+Hvis intet kan identificeres, returner [].
+
+Eksempel: ["yoghurt","smør","mayonnaise","kartoffel"]`
+    }
+  ];
+
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2024-02-01"
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 500,
+      messages: [{ role: "user", content }]
+    })
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text();
+    return {
+      ok: false,
+      error_code: "API_ERROR",
+      debug: errText.slice(0, 400)
+    };
+  }
+
+  const data = await resp.json();
+  const text = data?.content?.[0]?.text ?? "[]";
+  const raw = safeParseArray(text);
+
+  return { ok: true, ingredients: raw };
 }
 
 /* ============================
@@ -189,42 +203,57 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
 
   try {
-    // Robust body parsing (handles string or object)
+    // Robust body parse
     let body = req.body;
     if (typeof body === "string") {
       try { body = JSON.parse(body); } catch { body = {}; }
     }
 
-    const images = body.images || (body.image ? [body.image] : []);
-    if (!images.length) return res.status(400).json({ error: "NO_IMAGES" });
+    const images = body?.images || (body?.image ? [body.image] : []);
+    if (!Array.isArray(images) || images.length === 0) {
+      return res.status(400).json({ error: "NO_IMAGES" });
+    }
 
     const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: "NO_API_KEY" });
+    if (!apiKey) {
+      return res.status(500).json({ error: "NO_API_KEY" });
+    }
 
-    const gate = qualityGate(images);
-    if (!gate.ok) {
+    // CONTRACT-TRO: vælg ÉT billede deterministisk
+    const bestImage = pickBestImage(images);
+
+    // Claude: ÉT billede pr request
+    const analysis = await analyzeSingleImageWithClaude({ image: bestImage, apiKey });
+
+    if (!analysis.ok) {
       return res.status(200).json({
         ingredients_detected: [],
         recipes: { simple: { title: "", missing: [] }, advanced: { title: "", missing: [] } },
         shopping_list: [],
-        error_code: "NO_USABLE_IMAGES"
+        error_code: analysis.error_code || "ANALYSIS_FAILED",
+        debug: analysis.debug
       });
     }
 
-    const rawIngredients = await analyzeImagesWithClaude(gate.images, apiKey);
-    const ingredients = mergeIngredients(rawIngredients);
+    // Normalize + dedupe
+    const ingredients = [...new Set((analysis.ingredients || []).map(normalizeIngredient))]
+      .filter(x => x && x.length > 1);
 
-    if (!ingredients.length) {
+    if (ingredients.length === 0) {
       return res.status(200).json({
         ingredients_detected: [],
         recipes: { simple: { title: "", missing: [] }, advanced: { title: "", missing: [] } },
         shopping_list: [],
-        error_code: "NO_INGREDIENTS_DETECTED"
+        error_code: "NO_INGREDIENTS_DETECTED",
+        message: "Kunne ikke finde ingredienser. Tag et tydeligere billede med bedre lys."
       });
     }
 
     const recipes = findRecipes(ingredients);
-    const shopping = [...new Set([...(recipes.simple.missing || []), ...(recipes.advanced.missing || [])])];
+    const shopping = [...new Set([
+      ...(recipes.simple.missing || []),
+      ...(recipes.advanced.missing || [])
+    ])];
 
     return res.status(200).json({
       ingredients_detected: ingredients,
