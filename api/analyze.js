@@ -114,12 +114,9 @@ function findRecipes(ingredients) {
 
 // Quality gate: Score image quality based on base64 data characteristics
 function scoreImageQuality(base64Data) {
-  // Decode base64 to get raw bytes for analysis
-  const binaryString = atob(base64Data);
-  const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
+  // Decode base64 to get raw bytes for analysis (Node.js compatible)
+  const buffer = Buffer.from(base64Data, 'base64');
+  const bytes = new Uint8Array(buffer);
   
   // Calculate basic quality metrics from JPEG data
   let score = 50; // Base score
