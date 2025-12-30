@@ -302,6 +302,19 @@
             font-weight: 500;
             cursor: pointer;
         }
+
+        #error-upload-btn {
+            margin-top: var(--spacing-md);
+            padding: var(--spacing-sm) var(--spacing-lg);
+            background: var(--white);
+            color: var(--primary);
+            border: 2px solid var(--primary);
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            display: inline-block;
+        }
     </style>
 </head>
 <body>
@@ -338,6 +351,10 @@
     <div id="error-screen" class="screen">
         <p class="error-message" id="error-message">Kunne ikke analysere billedet.</p>
         <button id="retry-btn">Prøv igen</button>
+        <label id="error-upload-btn">
+            Upload billede
+            <input type="file" id="error-file-input" accept="image/*" hidden>
+        </label>
     </div>
 
     <script src="script.js"></script>
