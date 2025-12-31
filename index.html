@@ -1,69 +1,364 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="da">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>FridgeMap</title>
-  <link rel="manifest" href="manifest.json">
+
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#2A9D8F" />
+
   <style>
-    body {
-      font-family: system-ui, sans-serif;
-      background: #ffffff;
-      margin: 0;
-      padding: 16px;
-      color: #111;
+    :root{
+      --teal:#2A9D8F;
+      --teal-dark:#1F756B;
+      --bg:#F6FBFA;
+      --text:#0E1B1A;
+      --muted:#5D6E6C;
+      --card:#FFFFFF;
+      --line:#DDEBE8;
+      --warn:#B45309;
+      --warn-bg:#FFF7ED;
+      --good:#047857;
+      --good-bg:#ECFDF5;
+      --bad:#B91C1C;
+      --bad-bg:#FEF2F2;
+      --shadow: 0 10px 30px rgba(14,27,26,.08);
+      --radius: 16px;
+      --radius2: 22px;
+      --font: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
     }
-    h1 {
-      font-size: 32px;
-      margin-bottom: 12px;
+
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      font-family:var(--font);
+      color:var(--text);
+      background:linear-gradient(180deg, var(--bg), #FFFFFF 60%);
     }
-    .card {
-      border: 1px solid #ddd;
-      border-radius: 12px;
-      padding: 16px;
+
+    .wrap{ max-width: 980px; margin: 0 auto; padding: 18px 16px 56px; }
+
+    .header{ display:flex; align-items:center; gap:12px; margin: 6px 0 16px; }
+    .logo{
+      width: 36px; height: 36px; border-radius: 12px; overflow:hidden;
+      box-shadow: 0 8px 20px rgba(42,157,143,.18);
+      background:#fff; display:flex; align-items:center; justify-content:center;
     }
-    .selected {
-      color: #1f9d8b;
-      font-weight: 600;
-      margin-bottom: 12px;
+    .logo img{ width: 100%; height:100%; object-fit:cover; }
+    .title{ display:flex; flex-direction:column; line-height:1.1; }
+    .title h1{ margin:0; font-size: 24px; letter-spacing:.2px; }
+    .title .sub{ margin-top:4px; font-size: 13px; color:var(--muted); }
+
+    .panel{
+      background:var(--card);
+      border:1px solid var(--line);
+      border-radius: var(--radius2);
+      box-shadow: var(--shadow);
+      overflow:hidden;
     }
-    .recipe {
-      margin-bottom: 16px;
+    .panel-head{
+      padding: 14px 14px 10px;
+      border-bottom:1px solid var(--line);
+      background: linear-gradient(180deg, #FFFFFF, #FAFFFE);
     }
-    .missing {
-      color: #b7791f;
-      font-weight: 500;
+    .panel-body{ padding: 14px; }
+
+    .controls{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+    .file{
+      display:flex; align-items:center; gap:10px; padding: 10px 12px;
+      border:1px solid var(--line); border-radius: 14px; background:#fff; min-width: 280px;
     }
-    input {
-      width: 100%;
-      padding: 10px;
-      font-size: 16px;
-      margin-bottom: 12px;
+    .file label{ font-size: 13px; color:var(--muted); margin-right:6px; white-space:nowrap; }
+    .file input[type="file"]{ width: 100%; }
+
+    select, input[type="text"]{
+      border:1px solid var(--line);
+      border-radius: 14px;
+      padding: 10px 12px;
+      font-size: 14px;
+      outline:none;
+      background:#fff;
     }
-    button {
-      background: #1f9d8b;
-      color: white;
-      border: none;
-      padding: 10px 14px;
-      font-size: 16px;
-      border-radius: 8px;
-      cursor: pointer;
+    select:focus, input[type="text"]:focus{
+      border-color: rgba(42,157,143,.65);
+      box-shadow: 0 0 0 4px rgba(42,157,143,.12);
     }
-    .warning {
-      color: #c53030;
-      margin-bottom: 12px;
+
+    .btn{
+      border:0;
+      border-radius: 14px;
+      padding: 11px 14px;
+      font-size: 14px;
+      cursor:pointer;
+      background: var(--teal);
+      color:#fff;
+      box-shadow: 0 10px 20px rgba(42,157,143,.22);
+      transition: transform .05s ease, filter .2s ease;
     }
+    .btn:hover{ filter: brightness(1.02); }
+    .btn:active{ transform: translateY(1px); }
+    .btn.secondary{
+      background: #E8F6F3;
+      color: var(--teal-dark);
+      box-shadow:none;
+      border:1px solid rgba(42,157,143,.25);
+    }
+    .btn.ghost{
+      background: transparent;
+      color: var(--teal-dark);
+      box-shadow:none;
+      border:1px solid var(--line);
+    }
+    .btn:disabled{ cursor:not-allowed; opacity:.6; }
+
+    .status{
+      margin-top: 12px;
+      padding: 12px 12px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background:#fff;
+      display:flex;
+      align-items:flex-start;
+      gap:10px;
+    }
+    .dot{
+      width:10px;height:10px;border-radius:999px;
+      background: var(--teal);
+      margin-top: 4px;
+      box-shadow: 0 0 0 4px rgba(42,157,143,.12);
+      flex: 0 0 auto;
+    }
+    .status .text{ font-size: 14px; color: var(--muted); line-height:1.35; }
+    .status.hidden{ display:none; }
+
+    .grid{ display:grid; grid-template-columns: 1fr; gap: 12px; }
+    @media (min-width: 920px){
+      .grid{ grid-template-columns: 1.1fr .9fr; align-items:start; }
+    }
+
+    .section-title{
+      font-size: 14px;
+      font-weight: 700;
+      margin: 0 0 10px;
+      color: var(--text);
+      letter-spacing:.2px;
+    }
+
+    .pill-row{ display:flex; flex-wrap:wrap; gap:8px; margin: 8px 0 0; }
+
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding: 8px 10px;
+      border-radius: 999px;
+      font-size: 13px;
+      border:1px solid var(--line);
+      background:#fff;
+      color: var(--text);
+      user-select:none;
+    }
+    .pill.good{
+      border-color: rgba(4,120,87,.25);
+      background: var(--good-bg);
+      color: var(--good);
+    }
+    .pill.warn{
+      border-color: rgba(180,83,9,.25);
+      background: var(--warn-bg);
+      color: var(--warn);
+    }
+    .pill.selected{
+      border-color: rgba(42,157,143,.35);
+      background: rgba(42,157,143,.12);
+      color: var(--teal-dark);
+      font-weight: 650;
+    }
+    .pill.bad{
+      border-color: rgba(185,28,28,.25);
+      background: var(--bad-bg);
+      color: var(--bad);
+    }
+
+    .pill button{
+      border:0;
+      background:transparent;
+      cursor:pointer;
+      color: inherit;
+      font-size: 14px;
+      line-height: 1;
+      padding: 0;
+      opacity:.85;
+    }
+    .pill button:hover{ opacity:1; }
+
+    .row{ display:flex; gap: 10px; align-items:center; flex-wrap:wrap; }
+    .mini{ font-size: 12px; color: var(--muted); }
+
+    .recipe-card{
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 12px 12px;
+      background:#fff;
+    }
+    .recipe-title{
+      margin:0;
+      font-size: 15px;
+      font-weight: 750;
+      letter-spacing:.2px;
+    }
+    .recipe-desc{
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height:1.35;
+    }
+    .recipe-meta{
+      margin-top: 10px;
+      display:flex;
+      flex-wrap:wrap;
+      gap: 8px;
+      align-items:center;
+    }
+    .recipe-meta .label{ font-size: 12px; color: var(--muted); }
+
+    .line{ height:1px;background:var(--line); margin: 10px 0; }
+
+    .confirm-box{
+      border:1px solid rgba(42,157,143,.25);
+      background: rgba(42,157,143,.08);
+      border-radius: 16px;
+      padding: 12px;
+    }
+    .confirm-actions{ display:flex; gap:10px; margin-top: 10px; flex-wrap:wrap; }
+    .footer-note{ margin-top: 10px; font-size: 12px; color: var(--muted); }
+
+    .hidden{ display:none !important; }
+
+    .spinner{
+      width:40px; height:40px;
+      border:4px solid #ddd;
+      border-top:4px solid var(--teal);
+      border-radius:50%;
+      animation: spin 1s linear infinite;
+      margin:0 auto;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg);} 100% { transform: rotate(360deg);} }
   </style>
 </head>
+
 <body>
+  <div class="wrap">
+    <div class="header">
+      <div class="logo">
+        <img src="icon-192.png" alt="FridgeMap icon" />
+      </div>
+      <div class="title">
+        <h1>FridgeMap</h1>
+        <div class="sub">Upload billeder, ret forslag, og få realistiske retter + mangelliste.</div>
+      </div>
+    </div>
 
-<h1>FridgeMap</h1>
+    <div class="panel">
+      <div class="panel-head">
+        <div class="controls">
+          <div class="file">
+            <label for="files">Billeder</label>
+            <input id="files" type="file" accept="image/*" multiple />
+          </div>
 
-<input id="input" placeholder="Indtast ingredienser (komma-separeret)" />
-<button onclick="run()">Fortsæt</button>
+          <select id="people">
+            <option value="1">1 person</option>
+            <option value="2">2 personer</option>
+            <option value="3">3 personer</option>
+            <option value="4">4+ personer</option>
+          </select>
 
-<div id="output" class="card" style="margin-top:16px;"></div>
+          <button class="btn" id="scanBtn">Scan</button>
+          <button class="btn secondary" id="resetBtn">Ny scanning</button>
+          <button class="btn ghost" id="demoBtn" title="Kører uden billeder (manuel flow)">Test uden billeder</button>
+        </div>
 
-<script src="script.js"></script>
+        <div id="status" class="status hidden">
+          <div class="dot"></div>
+          <div class="text" id="statusText">Klar.</div>
+        </div>
+      </div>
+
+      <div class="panel-body">
+        <div class="grid">
+
+          <div>
+            <div class="section-title">1) Forslag (Sikker / Usikker)</div>
+
+            <div id="loadingBox" class="hidden" style="text-align:center; padding:18px 0;">
+              <div class="spinner"></div>
+              <div class="mini" style="margin-top:10px;">Analyserer…</div>
+            </div>
+
+            <div id="suggestionsEmpty" class="mini">Ingen data endnu. Upload billeder og tryk Scan.</div>
+
+            <div id="suggestionsWrap" class="hidden">
+              <div class="row">
+                <div class="mini">Klik på “Usikker” for at gøre den “Sikker”. Fjern med kryds.</div>
+              </div>
+
+              <div class="pill-row" id="safeRow"></div>
+              <div class="pill-row" id="unsureRow" style="margin-top:10px;"></div>
+
+              <div id="nonFoodWrap" class="hidden" style="margin-top:10px;">
+                <div class="mini" style="margin-bottom:8px;">Ikke-mad (kan fjernes fra listen):</div>
+                <div class="pill-row" id="nonFoodRow"></div>
+              </div>
+
+              <div class="line"></div>
+
+              <div class="section-title" style="margin:0 0 8px;">2) Tilføj manuelt</div>
+              <div class="row">
+                <input id="manualInput" type="text" placeholder="Tilføj (fx ost, kaffe, yoghurt)" />
+                <button class="btn secondary" id="addBtn">Tilføj</button>
+              </div>
+
+              <div class="confirm-box" style="margin-top:12px;">
+                <div class="section-title" style="margin:0 0 6px;">Du har valgt:</div>
+                <div class="pill-row" id="truthRow" style="margin-top:10px;"></div>
+
+                <div class="confirm-actions">
+                  <button class="btn" id="confirmBtn">Foreslå retter</button>
+                  <button class="btn ghost" id="editBtn">Ret listen</button>
+                </div>
+
+                <div class="footer-note">
+                  Retter og mangler beregnes ud fra din valgte liste.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div class="section-title">3) Forslag</div>
+
+            <div id="truthBanner" class="status hidden" style="margin-top:0;">
+              <div class="dot"></div>
+              <div class="text">
+                <div style="font-weight:750; color: var(--text); margin-bottom:4px;">Du har valgt:</div>
+                <div id="truthBannerList" style="color:var(--muted);"></div>
+              </div>
+            </div>
+
+            <div id="recipesEmpty" class="mini" style="margin-top:10px;">
+              Klik “Foreslå retter” for at få relevante forslag + mangler.
+            </div>
+
+            <div id="recipesWrap" class="hidden" style="margin-top:10px; display:grid; gap:10px;"></div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
 </body>
 </html>
