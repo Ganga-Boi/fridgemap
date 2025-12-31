@@ -1,24 +1,12 @@
 {
   "name": "FridgeMap",
   "short_name": "FridgeMap",
-  "description": "Scan dit køleskab, få måltidsforslag",
-  "start_url": "/",
+  "start_url": ".",
   "display": "standalone",
-  "background_color": "#F5F5F5",
+  "background_color": "#F6FBFA",
   "theme_color": "#2A9D8F",
-  "orientation": "portrait",
   "icons": [
-    {
-      "src": "/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
-    }
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
   ]
 }
