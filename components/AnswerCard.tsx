@@ -33,7 +33,7 @@ export default function AnswerCard({
 
       <p className="meta">
         {minutesLine(answer.recipe.minutes)}
-        <span className="dot" aria-hidden="true">
+        <span className="meta-dot" aria-hidden="true">
           ·
         </span>
         {statusLine(answer)}

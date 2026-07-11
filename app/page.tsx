@@ -1,61 +1,98 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import AnswerCard from "../components/AnswerCard";
+import { BUTTONS, EMPTY_PANTRY, OUT_OF_IDEAS, statusLine } from "../lib/copy";
+import {
+  MAX_REJECTIONS,
+  applyEveningRule,
+  createInitialSuggestionState,
+  rejectCurrentSuggestion,
+} from "../lib/homeState";
+import { FIXTURE_HOUSEHOLD } from "../lib/fixtures";
+import { buildAnswer, filterCandidates, rankFallback, type RankedRecipe } from "../lib/matcher";
+import { allApprovedRecipes } from "../lib/recipes/recipeEngine";
+import type { Answer, Pantry, PantryItem, ScanAnalysisResponse } from "../types/contracts";
 
 const API_URL = "/api/analyze";
+const LOW_CONFIDENCE_CUTOFF = 0.68;
+const APPROVED_RECIPES = allApprovedRecipes();
+const HOUSEHOLD_PROFILE = FIXTURE_HOUSEHOLD;
+const CANDIDATE_RECIPES = filterCandidates(APPROVED_RECIPES, HOUSEHOLD_PROFILE);
+const DISPLAY_NAME_BY_ID = new Map<string, string>();
+const INPUT_TO_ID = new Map<string, string>();
 
-type IngredientPayload = {
-  safe?: string[];
-  unsure?: string[];
-  nonFood?: string[];
-};
+for (const recipe of APPROVED_RECIPES) {
+  for (const ingredient of recipe.ingredients) {
+    DISPLAY_NAME_BY_ID.set(ingredient.ingredientId, ingredient.displayName);
+    registerLookup(ingredient.ingredientId, ingredient.ingredientId);
+    registerLookup(ingredient.ingredientId.replace(/_/g, " "), ingredient.ingredientId);
+    registerLookup(ingredient.displayName, ingredient.ingredientId);
+  }
+}
 
-type RecipeResult = {
-  title: string;
-  desc: string;
-  uses: string[];
-  missing: string[];
-  score: number;
-};
+for (const [alias, ingredientId] of Object.entries({
+  æg: "aeg",
+  løg: "loeg",
+  hvidløg: "hvidloeg",
+  fløde: "floede",
+  mælk: "maelk",
+  smør: "smoer",
+  ost: "revet_ost",
+  tomat: "tomat_frisk",
+  tomater: "tomat_frisk",
+  kylling: "kyllingebryst",
+  oksekød: "hakket_oksekoed",
+  "hakket oksekød": "hakket_oksekoed",
+})) {
+  registerLookup(alias, ingredientId);
+}
 
-type AnalyzeResponse = {
+type ScanRouteResponse = {
   ok: boolean;
-  mode?: "images" | "ingredients" | "empty";
-  ingredients?: IngredientPayload;
-  nonFoodFromChosen?: string[];
-  chosen?: string[];
-  peopleLabel?: string;
-  recipes?: RecipeResult[];
-  message?: string;
+  items?: ScanAnalysisResponse["items"];
   error?: string;
   details?: string;
 };
 
-function normalize(value: string) {
-  return (value || "")
-    .toString()
+function normalizeLookup(value: string) {
+  return value
     .trim()
     .toLowerCase()
-    .replace(/\s+/g, " ")
-    .replace(/[.,;:!?()"]/g, "");
+    .replace(/_/g, " ")
+    .replace(/æ/g, "ae")
+    .replace(/ø/g, "oe")
+    .replace(/å/g, "aa")
+    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+    .replace(/\s+/g, " ");
 }
 
-function sortItems(items: Iterable<string>) {
-  return Array.from(items).sort((a, b) => a.localeCompare(b, "da-DK"));
+function registerLookup(alias: string, ingredientId: string) {
+  const key = normalizeLookup(alias);
+  if (!key || INPUT_TO_ID.has(key)) return;
+  INPUT_TO_ID.set(key, ingredientId);
 }
 
-async function filesToDataUrls(files: File[]) {
-  const urls: string[] = [];
-  for (const file of files.slice(0, 8)) {
-    const url = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(file);
-    });
-    urls.push(url);
-  }
-  return urls;
+function displayIngredient(ingredientId: string) {
+  return DISPLAY_NAME_BY_ID.get(ingredientId) ?? ingredientId.replace(/_/g, " ");
+}
+
+function findIngredientId(value: string) {
+  return INPUT_TO_ID.get(normalizeLookup(value)) ?? null;
+}
+
+function filesToDataUrls(files: File[]) {
+  return Promise.all(
+    files.slice(0, 4).map(
+      (file) =>
+        new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(file);
+        })
+    )
+  );
 }
 
 async function postJSON(body: unknown) {
@@ -70,106 +107,197 @@ async function postJSON(body: unknown) {
     throw new Error(`API fejl (${response.status}): ${text}`.trim());
   }
 
-  return (await response.json()) as AnalyzeResponse;
+  return (await response.json()) as ScanRouteResponse;
+}
+
+function makeDraftItem(
+  item: ScanAnalysisResponse["items"][number],
+  seenAt: string
+): PantryItem {
+  return {
+    ingredientId: item.ingredientId,
+    quantity: item.quantity,
+    confidence: item.confidence,
+    source: "scan",
+    seenAt,
+  };
+}
+
+function sortDraftItems(items: PantryItem[]) {
+  return [...items].sort((a, b) => {
+    if (b.confidence !== a.confidence) return b.confidence - a.confidence;
+    return displayIngredient(a.ingredientId).localeCompare(displayIngredient(b.ingredientId), "da-DK");
+  });
+}
+
+function createPantry(items: PantryItem[], lastScanAt: string, previous: Pantry | null): Pantry {
+  return {
+    items: sortDraftItems(items),
+    lastScanAt,
+    deductions: previous?.deductions ?? [],
+  };
+}
+
+function buildSuggestionDeck(pantry: Pantry, now: Date) {
+  return applyEveningRule(
+    rankFallback(
+      CANDIDATE_RECIPES,
+      pantry,
+      HOUSEHOLD_PROFILE,
+      pantry.deductions,
+      now.toISOString()
+    ),
+    now.getHours()
+  );
+}
+
+function pickSurpriseIndex(deck: RankedRecipe[]) {
+  const complete = deck
+    .map((entry, index) => ({ entry, index }))
+    .filter(({ entry }) => entry.missingCore.length === 0);
+
+  if (complete.length > 0) {
+    return complete[complete.length - 1].index;
+  }
+
+  return deck.length > 0 ? deck.length - 1 : 0;
+}
+
+function fileSummary(files: File[]) {
+  if (files.length === 0) return "Ingen billeder valgt endnu.";
+  if (files.length === 1) return files[0].name;
+  return `${files.length} billeder klar.`;
+}
+
+function quantityLabel(quantity: PantryItem["quantity"]) {
+  switch (quantity) {
+    case "rigeligt":
+      return "Rigeligt";
+    case "noget":
+      return "Noget";
+    case "lidt":
+      return "Lidt";
+  }
+}
+
+function errorMessage(error: string | undefined) {
+  switch (error) {
+    case "OPENAI_API_KEY_MISSING":
+      return "Jeg mangler stadig nøglen til billedforståelsen i produktion.";
+    case "VISION_JSON_PARSE_ERROR":
+      return "Jeg kunne ikke læse svaret rent nok denne gang. Prøv gerne igen med 2-4 tydelige billeder.";
+    case "NO_FRAMES":
+      return "Vælg mindst ét billede først.";
+    default:
+      return "Der gik noget galt. Prøv gerne igen om et øjeblik.";
+  }
 }
 
 export default function Home() {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const recipeRef = useRef<HTMLElement | null>(null);
+
   const [files, setFiles] = useState<File[]>([]);
-  const [people, setPeople] = useState("1");
+  const [draftItems, setDraftItems] = useState<PantryItem[]>([]);
+  const [committedPantry, setCommittedPantry] = useState<Pantry | null>(null);
+  const [lastScanAt, setLastScanAt] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [safe, setSafe] = useState<string[]>([]);
-  const [unsure, setUnsure] = useState<string[]>([]);
-  const [nonFood, setNonFood] = useState<string[]>([]);
-  const [truth, setTruth] = useState<string[]>([]);
   const [manualInput, setManualInput] = useState("");
-  const [recipeData, setRecipeData] = useState<{
-    chosen: string[];
-    peopleLabel: string;
-    recipes: RecipeResult[];
-  } | null>(null);
+  const [ingredientsDirty, setIngredientsDirty] = useState(false);
+  const [showRecipe, setShowRecipe] = useState(false);
+  const [suggestionState, setSuggestionState] = useState(createInitialSuggestionState());
 
-  const safeItems = useMemo(() => sortItems(safe), [safe]);
-  const unsureItems = useMemo(() => sortItems(unsure), [unsure]);
-  const nonFoodItems = useMemo(() => sortItems(nonFood), [nonFood]);
-  const truthItems = useMemo(() => sortItems(truth), [truth]);
+  const groupedItems = useMemo(() => {
+    const sorted = sortDraftItems(draftItems);
+    return {
+      certain: sorted.filter((item) => item.confidence >= LOW_CONFIDENCE_CUTOFF),
+      doubleCheck: sorted.filter((item) => item.confidence < LOW_CONFIDENCE_CUTOFF),
+    };
+  }, [draftItems]);
 
-  const suggestionsVisible =
-    safeItems.length > 0 || unsureItems.length > 0 || nonFoodItems.length > 0 || truthItems.length > 0;
+  const suggestionDeck = committedPantry ? buildSuggestionDeck(committedPantry, new Date()) : [];
+  const currentIndex = suggestionDeck.length > 0
+    ? Math.min(suggestionState.cursor, suggestionDeck.length - 1)
+    : 0;
+  const currentRanked = suggestionDeck[currentIndex] ?? null;
+  const currentAnswer = currentRanked && committedPantry
+    ? buildAnswer(currentRanked.recipe, committedPantry, new Date().toISOString())
+    : null;
+  const alternatives = committedPantry
+    ? suggestionDeck
+        .map((entry, index) => ({
+          index,
+          answer: buildAnswer(entry.recipe, committedPantry, new Date().toISOString()),
+        }))
+        .filter(({ index }) => index !== currentIndex)
+        .slice(0, 3)
+    : [];
+  const hitLimit = suggestionState.rejections >= MAX_REJECTIONS;
 
-  function setFromAnalysis(payload: AnalyzeResponse) {
-    const nextSafe = sortItems((payload.ingredients?.safe || []).map(normalize).filter(Boolean));
-    const nextSafeSet = new Set(nextSafe);
-    const nextUnsure = sortItems(
-      (payload.ingredients?.unsure || [])
-        .map(normalize)
-        .filter((item) => Boolean(item) && !nextSafeSet.has(item))
-    );
-    const nextNonFood = sortItems((payload.ingredients?.nonFood || []).map(normalize).filter(Boolean));
+  useEffect(() => {
+    setShowRecipe(false);
+  }, [currentIndex, committedPantry?.lastScanAt]);
 
-    setSafe(nextSafe);
-    setUnsure(nextUnsure);
-    setNonFood(nextNonFood);
-    setTruth(sortItems(new Set([...nextSafe, ...nextUnsure])));
-    setRecipeData(null);
+  useEffect(() => {
+    if (showRecipe) {
+      recipeRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [showRecipe]);
+
+  function replaceDraftItems(nextItems: PantryItem[]) {
+    setDraftItems(sortDraftItems(nextItems));
+    if (committedPantry) setIngredientsDirty(true);
   }
 
   function resetAll() {
     setFiles([]);
-    setPeople("1");
+    setDraftItems([]);
+    setCommittedPantry(null);
+    setLastScanAt(null);
     setStatus(null);
     setLoading(false);
-    setSafe([]);
-    setUnsure([]);
-    setNonFood([]);
-    setTruth([]);
     setManualInput("");
-    setRecipeData(null);
-  }
-
-  function removeEverywhere(item: string) {
-    setSafe((current) => current.filter((entry) => entry !== item));
-    setUnsure((current) => current.filter((entry) => entry !== item));
-    setNonFood((current) => current.filter((entry) => entry !== item));
-    setTruth((current) => current.filter((entry) => entry !== item));
-  }
-
-  function moveUnsureToSafe(item: string) {
-    setUnsure((current) => current.filter((entry) => entry !== item));
-    setSafe((current) => sortItems(new Set([...current, item])));
-    setTruth((current) => sortItems(new Set([...current, item])));
+    setIngredientsDirty(false);
+    setShowRecipe(false);
+    setSuggestionState(createInitialSuggestionState());
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   async function handleScan() {
+    if (!files.length) {
+      setStatus("Vælg mindst ét billede først.");
+      return;
+    }
+
     try {
-      if (!files.length) {
-        setStatus("Vælg mindst ét billede.");
-        return;
-      }
-
-      setStatus("Analyserer billeder…");
       setLoading(true);
+      setStatus("Jeg kigger lige i køleskabet.");
 
-      const images = await filesToDataUrls(files);
-      const result = await postJSON({ images, people });
+      const frames = await filesToDataUrls(files);
+      const result = await postJSON({ frames });
 
       if (!result.ok) {
-        setStatus("Kunne ikke analysere.");
+        setStatus(errorMessage(result.error));
         return;
       }
 
-      if (result.message === "OPENAI_API_KEY_MISSING") {
-        setSafe([]);
-        setUnsure([]);
-        setNonFood([]);
-        setTruth([]);
-        setRecipeData(null);
-        setStatus("Scanningen er klar i appen, men OPENAI_API_KEY mangler i Vercel. Tilføj nøglen under Settings -> Environment Variables.");
+      const seenAt = new Date().toISOString();
+      const nextItems = (result.items ?? []).map((item) => makeDraftItem(item, seenAt));
+
+      setDraftItems(sortDraftItems(nextItems));
+      setCommittedPantry(null);
+      setLastScanAt(seenAt);
+      setIngredientsDirty(false);
+      setShowRecipe(false);
+      setSuggestionState(createInitialSuggestionState());
+
+      if (nextItems.length === 0) {
+        setStatus("Jeg fandt ikke nok endnu. Tilføj gerne et par ting selv nedenfor.");
         return;
       }
 
-      setFromAnalysis(result);
-      setStatus("Forslag klar. Ret listen og klik “Foreslå retter”.");
+      setStatus("Jeg fandt noget. Ret listen, og få et stærkt bud til i aften.");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setStatus(`Fejl: ${message}`);
@@ -178,313 +306,427 @@ export default function Home() {
     }
   }
 
-  function handleDemo() {
-    setFromAnalysis({
-      ok: true,
-      ingredients: {
-        safe: ["mælk", "skyr", "mayonnaise"],
-        unsure: ["citron", "olie"],
-        nonFood: ["benzin"],
+  function handleQuantityChange(ingredientId: string, quantity: PantryItem["quantity"]) {
+    replaceDraftItems(
+      draftItems.map((item) =>
+        item.ingredientId === ingredientId ? { ...item, quantity } : item
+      )
+    );
+  }
+
+  function handleRemove(ingredientId: string) {
+    replaceDraftItems(draftItems.filter((item) => item.ingredientId !== ingredientId));
+  }
+
+  function handleManualAdd() {
+    const ingredientId = findIngredientId(manualInput);
+    if (!ingredientId) {
+      setStatus("Jeg kender ikke den vare endnu. Prøv fx mælk, ris, kylling eller revet ost.");
+      return;
+    }
+
+    if (draftItems.some((item) => item.ingredientId === ingredientId)) {
+      setStatus(`${displayIngredient(ingredientId)} står allerede på listen.`);
+      setManualInput("");
+      return;
+    }
+
+    const seenAt = lastScanAt ?? new Date().toISOString();
+    replaceDraftItems([
+      ...draftItems,
+      {
+        ingredientId,
+        quantity: "noget",
+        confidence: 1,
+        source: "onboarding",
+        seenAt,
       },
-    });
-    setStatus("Test-mode: ret listen og klik “Foreslå retter”.");
-  }
-
-  function handleAddManual() {
-    const item = normalize(manualInput);
-    if (!item) return;
-
-    setTruth((current) => sortItems(new Set([...current, item])));
-    setSafe((current) => sortItems(new Set([...current, item])));
-    setUnsure((current) => current.filter((entry) => entry !== item));
-    setNonFood((current) => current.filter((entry) => entry !== item));
+    ]);
+    setLastScanAt(seenAt);
     setManualInput("");
+    setStatus(`${displayIngredient(ingredientId)} er lagt til.`);
   }
 
-  async function handleConfirm() {
-    try {
-      const chosen = truthItems.map(normalize).filter(Boolean);
-      if (!chosen.length) {
-        setStatus("Tilføj mindst én ingrediens.");
-        return;
-      }
-
-      setStatus("Beregner forslag…");
-      setLoading(true);
-
-      const result = await postJSON({ ingredients: chosen, people });
-      if (!result.ok) {
-        setStatus("Kunne ikke beregne forslag.");
-        return;
-      }
-
-      const nonFoodFromChosen = (result.nonFoodFromChosen || []).map(normalize).filter(Boolean);
-      if (nonFoodFromChosen.length) {
-        setNonFood((current) => sortItems(new Set([...current, ...nonFoodFromChosen])));
-        setTruth((current) => current.filter((entry) => !nonFoodFromChosen.includes(entry)));
-        setSafe((current) => current.filter((entry) => !nonFoodFromChosen.includes(entry)));
-        setUnsure((current) => current.filter((entry) => !nonFoodFromChosen.includes(entry)));
-        setStatus("Nogle ord ligner ikke mad og er taget ud af listen. Klik “Foreslå retter” igen.");
-        return;
-      }
-
-      setRecipeData({
-        chosen: result.chosen || chosen,
-        peopleLabel: result.peopleLabel || "",
-        recipes: result.recipes || [],
-      });
-      setStatus("Klar.");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setStatus(`Fejl: ${message}`);
-    } finally {
-      setLoading(false);
+  function handleSuggest() {
+    if (!draftItems.length) {
+      setStatus("Tilføj mindst én vare først.");
+      return;
     }
+
+    const pantry = createPantry(
+      draftItems,
+      lastScanAt ?? new Date().toISOString(),
+      committedPantry
+    );
+    const deck = buildSuggestionDeck(pantry, new Date());
+
+    setCommittedPantry(pantry);
+    setSuggestionState(createInitialSuggestionState());
+    setIngredientsDirty(false);
+    setShowRecipe(false);
+
+    if (!deck.length) {
+      setStatus("Jeg kan ikke finde en god hverdagsret ud fra det her endnu. Tilføj gerne noget mere bærende.");
+      return;
+    }
+
+    const firstAnswer = buildAnswer(deck[0].recipe, pantry, new Date().toISOString());
+    setStatus(statusLine(firstAnswer));
+  }
+
+  function handleSomethingElse() {
+    if (!suggestionDeck.length) return;
+
+    const nextState = rejectCurrentSuggestion(suggestionState, suggestionDeck.length);
+    setSuggestionState(nextState);
+    setShowRecipe(false);
+
+    if (nextState.rejections >= MAX_REJECTIONS) {
+      setStatus(OUT_OF_IDEAS);
+      return;
+    }
+
+    const nextIndex = Math.min(nextState.cursor, suggestionDeck.length - 1);
+    const nextAnswer = buildAnswer(
+      suggestionDeck[nextIndex].recipe,
+      committedPantry!,
+      new Date().toISOString()
+    );
+    setStatus(statusLine(nextAnswer));
+  }
+
+  function handleSurprise() {
+    if (!suggestionDeck.length) return;
+    const surpriseIndex = pickSurpriseIndex(suggestionDeck);
+    setSuggestionState((current) => ({ ...current, cursor: surpriseIndex }));
+    setShowRecipe(false);
+
+    const surpriseAnswer = buildAnswer(
+      suggestionDeck[surpriseIndex].recipe,
+      committedPantry!,
+      new Date().toISOString()
+    );
+    setStatus(statusLine(surpriseAnswer));
+  }
+
+  function handleResetSuggestions() {
+    setSuggestionState(createInitialSuggestionState());
+    setShowRecipe(false);
+    if (currentAnswer) setStatus(statusLine(currentAnswer));
+  }
+
+  function handlePickAlternative(index: number) {
+    setSuggestionState({ cursor: index, rejections: 0 });
+    setShowRecipe(false);
+    const answer = buildAnswer(
+      suggestionDeck[index].recipe,
+      committedPantry!,
+      new Date().toISOString()
+    );
+    setStatus(statusLine(answer));
   }
 
   return (
-    <main className="fridge-page">
-      <div className="wrap">
-        <div className="header">
-          <div className="logo">
-            <img src="/icon-192.png" alt="FridgeMap icon" />
-          </div>
-          <div className="title">
-            <h1>FridgeMap</h1>
-            <div className="sub">Upload billeder, ret forslag, og få realistiske retter + mangelliste.</div>
-          </div>
+    <main className="page-shell">
+      <div className="page-header">
+        <div className="brand-mark">FM</div>
+        <div className="brand-copy">
+          <p className="kicker">FridgeMap</p>
+          <h1>Tag billeder af køleskabet. Få ét godt bud til aftensmad.</h1>
+          <p className="lead">
+            Først finder vi varerne. Så retter du listen. Til sidst får du en ret og
+            hvad der eventuelt mangler.
+          </p>
         </div>
+      </div>
 
-        <div className="panel">
-          <div className="panel-head">
-            <div className="controls">
-              <label className="file">
-                <span>Billeder</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  onChange={(event) => setFiles(Array.from(event.target.files || []))}
-                />
-              </label>
-
-              <select value={people} onChange={(event) => setPeople(event.target.value)}>
-                <option value="1">1 person</option>
-                <option value="2">2 personer</option>
-                <option value="3">3 personer</option>
-                <option value="4">4+ personer</option>
-              </select>
-
-              <button className="btn" type="button" onClick={handleScan} disabled={loading}>
-                Scan
-              </button>
-              <button className="btn secondary" type="button" onClick={resetAll} disabled={loading}>
-                Ny scanning
-              </button>
-              <button className="btn ghost" type="button" onClick={handleDemo} disabled={loading}>
-                Test uden billeder
-              </button>
+      <div className="page-body">
+        <section className="scan-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="panel-label">1. Kig i køleskabet</p>
+              <h2>Start med 2-4 tydelige billeder</h2>
             </div>
-
-            {status ? (
-              <div className="status">
-                <div className="dot" />
-                <div className="text">{status}</div>
-              </div>
-            ) : null}
+            <button type="button" className="quiet-button" onClick={resetAll}>
+              Ny runde
+            </button>
           </div>
 
-          <div className="panel-body">
-            <div className="grid">
-              <div>
-                <div className="section-title">1) Forslag (Sikker / Usikker)</div>
+          <div className="scan-controls">
+            <label className="file-picker">
+              <span>Vælg billeder</span>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={(event) => setFiles(Array.from(event.target.files || []))}
+              />
+            </label>
 
-                {loading ? (
-                  <div className="loading-box">
-                    <div className="spinner" />
-                    <div className="mini">Analyserer…</div>
-                  </div>
+            <button type="button" className="cta-button" onClick={handleScan} disabled={loading}>
+              {loading ? "Et øjeblik" : "Find det i køleskabet"}
+            </button>
+          </div>
+
+          <p className="helper-text">{fileSummary(files)}</p>
+
+          {status ? (
+            <div className="status-banner" role="status">
+              <span className="status-pill" />
+              <p>{status}</p>
+            </div>
+          ) : null}
+
+          <div className="editor-grid">
+            <section className="editor-card">
+              <div className="section-head">
+                <div>
+                  <p className="panel-label">2. Tjek listen</p>
+                  <h3>Det her vil jeg regne med</h3>
+                </div>
+                {draftItems.length > 0 ? (
+                  <button type="button" className="quiet-button" onClick={handleSuggest}>
+                    Foreslå aftensmad
+                  </button>
                 ) : null}
+              </div>
 
-                {!suggestionsVisible ? (
-                  <div className="mini">Ingen data endnu. Upload billeder og tryk Scan.</div>
-                ) : (
-                  <div>
-                    <div className="row">
-                      <div className="mini">Klik på “Usikker” for at gøre den “Sikker”. Fjern med kryds.</div>
-                    </div>
-
-                    <div className="pill-row">
-                      {safeItems.map((item) => (
-                        <div className="pill good" key={`safe-${item}`}>
-                          {item}
-                          <button type="button" title="Fjern" onClick={() => removeEverywhere(item)}>
-                            ×
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="pill-row spaced">
-                      {unsureItems.map((item) => (
-                        <button
-                          className="pill warn pill-button"
-                          key={`unsure-${item}`}
-                          type="button"
-                          onClick={() => moveUnsureToSafe(item)}
-                        >
-                          <span>{item}</span>
-                          <span
-                            className="remove-inline"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              removeEverywhere(item);
-                            }}
-                          >
-                            ×
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-
-                    {nonFoodItems.length ? (
-                      <div className="non-food-wrap">
-                        <div className="mini">Ikke-mad (kan fjernes fra listen):</div>
-                        <div className="pill-row">
-                          {nonFoodItems.map((item) => (
-                            <div className="pill bad" key={`non-food-${item}`}>
-                              {item}
-                              <button type="button" title="Fjern" onClick={() => removeEverywhere(item)}>
-                                ×
+              {draftItems.length === 0 ? (
+                <p className="empty-copy">{EMPTY_PANTRY}</p>
+              ) : (
+                <>
+                  {groupedItems.certain.length > 0 ? (
+                    <div className="review-block">
+                      <p className="list-label">Ser rigtigt ud</p>
+                      <div className="ingredient-list">
+                        {groupedItems.certain.map((item) => (
+                          <article className="ingredient-card" key={item.ingredientId}>
+                            <div className="ingredient-copy">
+                              <strong>{displayIngredient(item.ingredientId)}</strong>
+                              <span>{item.source === "onboarding" ? "lagt til af dig" : "fra billederne"}</span>
+                            </div>
+                            <div className="ingredient-actions">
+                              <select
+                                className="quantity-select"
+                                value={item.quantity}
+                                onChange={(event) =>
+                                  handleQuantityChange(
+                                    item.ingredientId,
+                                    event.target.value as PantryItem["quantity"]
+                                  )
+                                }
+                              >
+                                <option value="rigeligt">{quantityLabel("rigeligt")}</option>
+                                <option value="noget">{quantityLabel("noget")}</option>
+                                <option value="lidt">{quantityLabel("lidt")}</option>
+                              </select>
+                              <button
+                                type="button"
+                                className="remove-button"
+                                onClick={() => handleRemove(item.ingredientId)}
+                              >
+                                Fjern
                               </button>
                             </div>
-                          ))}
-                        </div>
+                          </article>
+                        ))}
                       </div>
-                    ) : null}
+                    </div>
+                  ) : null}
 
-                    <div className="line" />
+                  {groupedItems.doubleCheck.length > 0 ? (
+                    <div className="review-block warning-block">
+                      <p className="list-label">Tjek lige de her</p>
+                      <div className="ingredient-list">
+                        {groupedItems.doubleCheck.map((item) => (
+                          <article className="ingredient-card warning-card" key={item.ingredientId}>
+                            <div className="ingredient-copy">
+                              <strong>{displayIngredient(item.ingredientId)}</strong>
+                              <span>jeg er ikke helt sikker på den</span>
+                            </div>
+                            <div className="ingredient-actions">
+                              <select
+                                className="quantity-select"
+                                value={item.quantity}
+                                onChange={(event) =>
+                                  handleQuantityChange(
+                                    item.ingredientId,
+                                    event.target.value as PantryItem["quantity"]
+                                  )
+                                }
+                              >
+                                <option value="rigeligt">{quantityLabel("rigeligt")}</option>
+                                <option value="noget">{quantityLabel("noget")}</option>
+                                <option value="lidt">{quantityLabel("lidt")}</option>
+                              </select>
+                              <button
+                                type="button"
+                                className="remove-button"
+                                onClick={() => handleRemove(item.ingredientId)}
+                              >
+                                Fjern
+                              </button>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
 
-                    <div className="section-title">2) Tilføj manuelt</div>
-                    <div className="row">
+                  <div className="manual-box">
+                    <p className="list-label">Tilføj selv noget jeg ikke fik med</p>
+                    <div className="manual-row">
                       <input
+                        className="text-input"
                         type="text"
-                        placeholder="Tilføj (fx ost, kaffe, yoghurt)"
                         value={manualInput}
+                        placeholder="fx mælk, ris, revet ost eller broccoli"
                         onChange={(event) => setManualInput(event.target.value)}
                         onKeyDown={(event) => {
-                          if (event.key === "Enter") handleAddManual();
+                          if (event.key === "Enter") handleManualAdd();
                         }}
                       />
-                      <button className="btn secondary" type="button" onClick={handleAddManual}>
+                      <button type="button" className="quiet-button" onClick={handleManualAdd}>
                         Tilføj
                       </button>
                     </div>
-
-                    <div className="confirm-box">
-                      <div className="section-title">Du har valgt:</div>
-                      <div className="pill-row">
-                        {truthItems.length ? (
-                          truthItems.map((item) => (
-                            <div className="pill selected" key={`truth-${item}`}>
-                              {item}
-                              <button type="button" title="Fjern" onClick={() => removeEverywhere(item)}>
-                                ×
-                              </button>
-                            </div>
-                          ))
-                        ) : (
-                          <span>Ingen ingredienser endnu.</span>
-                        )}
-                      </div>
-
-                      <div className="confirm-actions">
-                        <button className="btn" type="button" onClick={handleConfirm} disabled={loading}>
-                          Foreslå retter
-                        </button>
-                        <button className="btn ghost" type="button" onClick={() => setRecipeData(null)}>
-                          Ret listen
-                        </button>
-                      </div>
-
-                      <div className="footer-note">Retter og mangler beregnes ud fra din valgte liste.</div>
-                    </div>
                   </div>
-                )}
+
+                  {ingredientsDirty ? (
+                    <p className="dirty-note">
+                      Listen er ændret. Tryk på <strong>Foreslå aftensmad</strong> igen, så
+                      opdaterer jeg buddet.
+                    </p>
+                  ) : null}
+                </>
+              )}
+            </section>
+
+            <section className="hero-panel">
+              <p className="panel-label">3. Mit bedste bud</p>
+
+              {!currentAnswer ? (
+                <div className="hero-empty">
+                  <h3>Et godt bud lander her</h3>
+                  <p>
+                    Når listen ser rigtig ud, får du ét tydeligt forslag med det samme
+                    plus hvad der eventuelt mangler.
+                  </p>
+                </div>
+              ) : hitLimit ? (
+                <div className="out-of-ideas">
+                  <h3>Vi er ved kanten af listen</h3>
+                  <p>{OUT_OF_IDEAS}</p>
+                  <div className="out-of-ideas-actions">
+                    <button type="button" className="cta-button" onClick={handleScan} disabled={loading || files.length === 0}>
+                      Kig igen
+                    </button>
+                    <button type="button" className="quiet-button" onClick={handleResetSuggestions}>
+                      {BUTTONS.tryAgain}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <AnswerCard
+                    answer={currentAnswer}
+                    now={new Date()}
+                    onShowRecipe={() => setShowRecipe(true)}
+                    onSomethingElse={handleSomethingElse}
+                    onSurprise={handleSurprise}
+                  />
+
+                  {alternatives.length > 0 ? (
+                    <div className="alternatives">
+                      <div className="section-head compact-head">
+                        <div>
+                          <p className="panel-label">Flere muligheder</p>
+                          <h3>Hvis du vil dreje en tand</h3>
+                        </div>
+                      </div>
+
+                      <div className="alternatives-grid">
+                        {alternatives.map(({ answer, index }) => (
+                          <button
+                            type="button"
+                            className="alternative-card"
+                            key={`${answer.recipe.id}-${index}`}
+                            onClick={() => handlePickAlternative(index)}
+                          >
+                            <strong>{answer.recipe.name}</strong>
+                            <span>{answer.recipe.minutes} minutter</span>
+                            <p>{statusLine(answer)}</p>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </>
+              )}
+            </section>
+          </div>
+        </section>
+
+        {currentAnswer && showRecipe ? (
+          <section className="recipe-sheet" ref={recipeRef}>
+            <div className="section-head">
+              <div>
+                <p className="panel-label">Vis retten</p>
+                <h2>{currentAnswer.recipe.name}</h2>
+              </div>
+              <div className="recipe-meta-badge">{currentAnswer.recipe.minutes} minutter</div>
+            </div>
+
+            <div className="recipe-grid">
+              <div className="recipe-side">
+                <div className="recipe-block">
+                  <h3>Det bruger jeg</h3>
+                  <ul className="ingredient-summary">
+                    {currentAnswer.recipe.ingredients
+                      .filter(
+                        (ingredient) =>
+                          !currentAnswer.missing.some(
+                            (missing) => missing.ingredientId === ingredient.ingredientId
+                          )
+                      )
+                      .map((ingredient) => (
+                        <li key={`have-${ingredient.ingredientId}`}>
+                          <span>{ingredient.displayName}</span>
+                          <strong>{ingredient.amountText}</strong>
+                        </li>
+                      ))}
+                  </ul>
+                </div>
+
+                <div className="recipe-block">
+                  <h3>Det mangler I</h3>
+                  {currentAnswer.missing.length > 0 ? (
+                    <ul className="ingredient-summary missing-summary">
+                      {currentAnswer.missing.map((ingredient) => (
+                        <li key={`missing-${ingredient.ingredientId}`}>
+                          <span>{ingredient.displayName}</span>
+                          <strong>{ingredient.amountText}</strong>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="empty-copy">I har det hele.</p>
+                  )}
+                </div>
               </div>
 
-              <div>
-                <div className="section-title">3) Forslag</div>
-
-                {recipeData ? (
-                  <>
-                    <div className="status status-static">
-                      <div className="dot" />
-                      <div className="text">
-                        <div className="chosen-title">Du har valgt:</div>
-                        <div>{recipeData.chosen.join(", ")}</div>
-                      </div>
-                    </div>
-
-                    <div className="recipes-list">
-                      {recipeData.recipes.length ? (
-                        recipeData.recipes.map((recipe) => (
-                          <div className="recipe-card" key={recipe.title}>
-                            <div className="recipe-title">{recipe.title}</div>
-                            <div className="recipe-desc">{recipe.desc}</div>
-
-                            <div className="recipe-meta">
-                              <span className="label">{recipeData.peopleLabel}</span>
-                            </div>
-
-                            <div className="recipe-meta top-gap">
-                              <span className="label">Bruger:</span>
-                            </div>
-                            <div className="pill-row compact">
-                              {recipe.uses.length ? (
-                                recipe.uses.map((item) => (
-                                  <span className="pill selected compact-pill" key={`${recipe.title}-uses-${item}`}>
-                                    {item}
-                                  </span>
-                                ))
-                              ) : (
-                                <span className="mini">—</span>
-                              )}
-                            </div>
-
-                            <div className="recipe-meta top-gap">
-                              <span className="label">Mangler:</span>
-                            </div>
-                            <div className="pill-row compact">
-                              {recipe.missing.length ? (
-                                recipe.missing.map((item) => (
-                                  <span className="pill warn compact-pill" key={`${recipe.title}-missing-${item}`}>
-                                    {item}
-                                  </span>
-                                ))
-                              ) : (
-                                <span className="pill good compact-pill">Mangler intet kritisk</span>
-                              )}
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="recipe-card">
-                          <div className="recipe-title">Ingen gode forslag endnu</div>
-                          <div className="recipe-desc">
-                            Tilføj 1–2 relevante ting (fx brød, kartofler, æg) og prøv igen.
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  <div className="mini top-gap">Klik “Foreslå retter” for at få relevante forslag + mangler.</div>
-                )}
+              <div className="recipe-steps-card">
+                <h3>Sådan gør du</h3>
+                <ol className="recipe-steps">
+                  {currentAnswer.recipe.steps.map((step) => (
+                    <li key={step}>{step}</li>
+                  ))}
+                </ol>
               </div>
             </div>
-          </div>
-        </div>
+          </section>
+        ) : null}
       </div>
     </main>
   );

@@ -38,7 +38,7 @@ export class OpenAIVisionProvider implements VisionProvider {
     ].join("\n");
 
     const payload = {
-      model: process.env.OPENAI_VISION_MODEL ?? "gpt-4.1-mini",
+      model: process.env.OPENAI_VISION_MODEL ?? "gpt-5.6",
       input: [
         { role: "system", content: [{ type: "input_text", text: system }] },
         {
