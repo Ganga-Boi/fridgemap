@@ -6,13 +6,24 @@ import type { ProviderName, VisionProvider } from "../../../types/contracts";
 import { OpenAIVisionProvider } from "./openai";
 import { AnthropicVisionProvider } from "./anthropic";
 import { GeminiVisionProvider } from "./gemini";
-import { DEFAULT_ANTHROPIC_VISION_MODEL, getAnthropicKeyDiagnostics } from "./anthropicConfig";
-import { getOpenAIKeyDiagnostics } from "./openaiConfig";
+import {
+  DEFAULT_ANTHROPIC_VISION_MODEL,
+  getAnthropicKeyDiagnostics,
+  getAnthropicKeySource,
+} from "./anthropicConfig";
+import { getOpenAIKeyDiagnostics, getOpenAIKeySource } from "./openaiConfig";
 
 const DEFAULT_VISION_PROVIDER: ProviderName = "openai";
 
 export function getVisionProviderName(): ProviderName {
-  const name = process.env.VISION_PROVIDER ?? DEFAULT_VISION_PROVIDER;
+  const explicitProvider = process.env.VISION_PROVIDER?.trim();
+  const name = explicitProvider
+    ? explicitProvider
+    : getAnthropicKeySource()
+      ? "claude"
+      : getOpenAIKeySource()
+        ? "openai"
+        : DEFAULT_VISION_PROVIDER;
 
   switch (name) {
     case "openai":
@@ -37,25 +48,38 @@ export function getVisionProvider(): VisionProvider {
 
 export function getVisionProviderDiagnostics() {
   const provider = getVisionProviderName();
+  const explicitProvider = process.env.VISION_PROVIDER?.trim() ?? null;
+  const providerSelectionMode = explicitProvider ? "explicit" : "automatic";
+  const availableKeys = {
+    ...getOpenAIKeyDiagnostics(),
+    ...getAnthropicKeyDiagnostics(),
+  };
 
   switch (provider) {
     case "openai":
       return {
         provider,
+        providerSelectionMode,
+        explicitProvider,
         providerModel: process.env.OPENAI_VISION_MODEL ?? "gpt-5.6",
-        ...getOpenAIKeyDiagnostics(),
+        ...availableKeys,
       };
     case "claude":
       return {
         provider,
+        providerSelectionMode,
+        explicitProvider,
         providerModel: process.env.ANTHROPIC_VISION_MODEL ?? DEFAULT_ANTHROPIC_VISION_MODEL,
-        ...getAnthropicKeyDiagnostics(),
+        ...availableKeys,
       };
     case "gemini":
     case "local":
       return {
         provider,
+        providerSelectionMode,
+        explicitProvider,
         providerModel: null,
+        ...availableKeys,
       };
   }
 }
