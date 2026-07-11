@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { getVisionProvider } from "../../../lib/providers/vision";
 import { buildVocabulary } from "../../../lib/vocabulary";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 function json(data: unknown, status = 200) {
   return NextResponse.json(data, { status });
 }
