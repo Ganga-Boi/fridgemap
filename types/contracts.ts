@@ -175,7 +175,7 @@ export const INGREDIENT_VOCABULARY_SAMPLE = [
   "hakket_oksekoed", "kyllingebryst", "bacon", "pasta_skruer", "spaghetti",
   "ris", "kartofler", "loeg", "hvidloeg", "gulerod", "peberfrugt", "broccoli",
   "tomat_frisk", "tomat_haakket_daase", "floede", "maelk", "creme_fraiche",
-  "smoer", "aeg", "revet_ost", "parmesan", "kokosmaelk", "karrypasta",
+  "smoer", "aeg", "revet_ost", "parmesan", "kokosmaelk", "karrypasta", "ketchup",
 ] as const;
 
 /* ------------------------------------------------------------------ */

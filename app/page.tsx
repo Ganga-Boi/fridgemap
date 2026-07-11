@@ -10,6 +10,7 @@ import {
   rejectCurrentSuggestion,
 } from "../lib/homeState";
 import { FIXTURE_HOUSEHOLD } from "../lib/fixtures";
+import { buildIngredientRegistry } from "../lib/ingredientRegistry";
 import { buildAnswer, filterCandidates, rankFallback, type RankedRecipe } from "../lib/matcher";
 import { allApprovedRecipes } from "../lib/recipes/recipeEngine";
 import type { Answer, Pantry, PantryItem, ScanAnalysisResponse } from "../types/contracts";
@@ -19,34 +20,7 @@ const LOW_CONFIDENCE_CUTOFF = 0.68;
 const APPROVED_RECIPES = allApprovedRecipes();
 const HOUSEHOLD_PROFILE = FIXTURE_HOUSEHOLD;
 const CANDIDATE_RECIPES = filterCandidates(APPROVED_RECIPES, HOUSEHOLD_PROFILE);
-const DISPLAY_NAME_BY_ID = new Map<string, string>();
-const INPUT_TO_ID = new Map<string, string>();
-
-for (const recipe of APPROVED_RECIPES) {
-  for (const ingredient of recipe.ingredients) {
-    DISPLAY_NAME_BY_ID.set(ingredient.ingredientId, ingredient.displayName);
-    registerLookup(ingredient.ingredientId, ingredient.ingredientId);
-    registerLookup(ingredient.ingredientId.replace(/_/g, " "), ingredient.ingredientId);
-    registerLookup(ingredient.displayName, ingredient.ingredientId);
-  }
-}
-
-for (const [alias, ingredientId] of Object.entries({
-  æg: "aeg",
-  løg: "loeg",
-  hvidløg: "hvidloeg",
-  fløde: "floede",
-  mælk: "maelk",
-  smør: "smoer",
-  ost: "revet_ost",
-  tomat: "tomat_frisk",
-  tomater: "tomat_frisk",
-  kylling: "kyllingebryst",
-  oksekød: "hakket_oksekoed",
-  "hakket oksekød": "hakket_oksekoed",
-})) {
-  registerLookup(alias, ingredientId);
-}
+const INGREDIENT_REGISTRY = buildIngredientRegistry(APPROVED_RECIPES);
 
 type ScanRouteResponse = {
   ok: boolean;
@@ -55,30 +29,12 @@ type ScanRouteResponse = {
   details?: string;
 };
 
-function normalizeLookup(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/_/g, " ")
-    .replace(/æ/g, "ae")
-    .replace(/ø/g, "oe")
-    .replace(/å/g, "aa")
-    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
-    .replace(/\s+/g, " ");
-}
-
-function registerLookup(alias: string, ingredientId: string) {
-  const key = normalizeLookup(alias);
-  if (!key || INPUT_TO_ID.has(key)) return;
-  INPUT_TO_ID.set(key, ingredientId);
-}
-
 function displayIngredient(ingredientId: string) {
-  return DISPLAY_NAME_BY_ID.get(ingredientId) ?? ingredientId.replace(/_/g, " ");
+  return INGREDIENT_REGISTRY.displayIngredient(ingredientId);
 }
 
 function findIngredientId(value: string) {
-  return INPUT_TO_ID.get(normalizeLookup(value)) ?? null;
+  return INGREDIENT_REGISTRY.findIngredientId(value);
 }
 
 function filesToDataUrls(files: File[]) {
