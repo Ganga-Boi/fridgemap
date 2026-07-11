@@ -1,0 +1,116 @@
+/* DESIGNTOKENS — fra designplanen. Ændringer kræver godkendelse.
+   Palet: varmt papir / granskov / rav (arvet fra FridgeMaps varsel).
+   Typografi: Fraunces (display) over systemskrift (brød). */
+
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,450;0,9..144,560;1,9..144,450&display=swap");
+
+:root {
+  --paper: #faf7f2;
+  --ink: #1e3a34;
+  --ink-soft: #5f6f6b;
+  --pine: #257d72;
+  --pine-deep: #1c5f57;
+  --amber: #b45309;
+  --display: "Fraunces", georgia, serif;
+  --body: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--body);
+  -webkit-font-smoothing: antialiased;
+}
+
+.page {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.answer {
+  width: 100%;
+  max-width: 26rem;
+  text-align: center;
+}
+
+.eyebrow {
+  font-size: 0.85rem;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  margin: 0 0 1.25rem;
+}
+
+.headline {
+  font-family: var(--display);
+  font-weight: 450;
+  font-size: clamp(1.9rem, 7.5vw, 2.6rem);
+  line-height: 1.18;
+  margin: 0 0 1rem;
+  text-wrap: balance;
+}
+
+.meta {
+  font-size: 1rem;
+  color: var(--ink-soft);
+  margin: 0 0 2.25rem;
+  line-height: 1.5;
+}
+
+.meta .dot { margin: 0 0.5em; }
+
+.actions { display: grid; gap: 0.75rem; }
+
+.single-action {
+  margin-top: 2.25rem;
+}
+
+button {
+  font-family: var(--body);
+  font-size: 1.05rem;
+  border-radius: 999px;
+  cursor: pointer;
+  min-height: 52px; /* køkken-tommelfingre, ikke skrivebords-mus */
+}
+
+button:focus-visible {
+  outline: 3px solid var(--amber);
+  outline-offset: 2px;
+}
+
+.primary {
+  background: var(--pine);
+  color: #fff;
+  border: none;
+  font-weight: 600;
+  padding: 0 1.5rem;
+}
+.primary:active { background: var(--pine-deep); }
+
+.secondary-row {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+}
+
+.quiet {
+  background: transparent;
+  border: 1.5px solid rgba(30, 58, 52, 0.25);
+  color: var(--ink);
+  padding: 0 1.25rem;
+  flex: 1;
+}
+.quiet:active { background: rgba(30, 58, 52, 0.06); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .answer { animation: settle 240ms ease-out; }
+  @keyframes settle {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: none; }
+  }
+}
