@@ -11,6 +11,11 @@ export async function GET() {
     ok: true,
     message: "FRIDGEMAP_SCAN_READY",
     vocabularySize: buildVocabulary().length,
+    diagnostics: {
+      hasOpenAIKey: Boolean(process.env.OPENAI_API_KEY),
+      vercelEnv: process.env.VERCEL_ENV ?? null,
+      nodeEnv: process.env.NODE_ENV ?? null,
+    },
   });
 }
 
