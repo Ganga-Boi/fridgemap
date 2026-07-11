@@ -23,6 +23,7 @@ export const FIXTURE_PANTRY: Pantry = {
     "kyllingebryst", "pasta_skruer", "floede", "loeg", "hvidloeg",
     "revet_ost", "ris", "karrypasta", "gulerod", "broccoli", "kartofler",
   ].map((ingredientId) => ({
+    rawLabel: ingredientId.replace(/_/g, " "),
     ingredientId,
     quantity: "noget" as const,
     confidence: 0.9,

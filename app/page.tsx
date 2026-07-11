@@ -10,7 +10,7 @@ import {
   rejectCurrentSuggestion,
 } from "../lib/homeState";
 import { FIXTURE_HOUSEHOLD } from "../lib/fixtures";
-import { buildIngredientRegistry } from "../lib/ingredientRegistry";
+import { buildIngredientRegistry, normalizeIngredientLookup } from "../lib/ingredientRegistry";
 import { buildAnswer, filterCandidates, rankFallback, type RankedRecipe } from "../lib/matcher";
 import { allApprovedRecipes } from "../lib/recipes/recipeEngine";
 import type { Answer, Pantry, PantryItem, ScanAnalysisResponse } from "../types/contracts";
@@ -20,7 +20,7 @@ const LOW_CONFIDENCE_CUTOFF = 0.68;
 const APPROVED_RECIPES = allApprovedRecipes();
 const HOUSEHOLD_PROFILE = FIXTURE_HOUSEHOLD;
 const CANDIDATE_RECIPES = filterCandidates(APPROVED_RECIPES, HOUSEHOLD_PROFILE);
-const INGREDIENT_REGISTRY = buildIngredientRegistry(APPROVED_RECIPES);
+const INGREDIENT_REGISTRY = buildIngredientRegistry();
 
 type ScanRouteResponse = {
   ok: boolean;
@@ -31,6 +31,18 @@ type ScanRouteResponse = {
 
 function displayIngredient(ingredientId: string) {
   return INGREDIENT_REGISTRY.displayIngredient(ingredientId);
+}
+
+function displayPantryItem(item: Pick<PantryItem, "ingredientId" | "rawLabel">) {
+  return item.ingredientId ? displayIngredient(item.ingredientId) : item.rawLabel;
+}
+
+function pantrySourceLabel(item: Pick<PantryItem, "ingredientId" | "source">) {
+  if (item.source === "onboarding") {
+    return item.ingredientId ? "lagt til af dig" : "lagt til af dig - ikke koblet endnu";
+  }
+
+  return item.ingredientId ? "fra billederne" : "fra billederne - ikke koblet endnu";
 }
 
 function findIngredientId(value: string) {
@@ -71,6 +83,7 @@ function makeDraftItem(
   seenAt: string
 ): PantryItem {
   return {
+    rawLabel: item.rawLabel,
     ingredientId: item.ingredientId,
     quantity: item.quantity,
     confidence: item.confidence,
@@ -82,7 +95,7 @@ function makeDraftItem(
 function sortDraftItems(items: PantryItem[]) {
   return [...items].sort((a, b) => {
     if (b.confidence !== a.confidence) return b.confidence - a.confidence;
-    return displayIngredient(a.ingredientId).localeCompare(displayIngredient(b.ingredientId), "da-DK");
+    return displayPantryItem(a).localeCompare(displayPantryItem(b), "da-DK");
   });
 }
 
@@ -165,10 +178,10 @@ export default function Home() {
   const [suggestionState, setSuggestionState] = useState(createInitialSuggestionState());
 
   const groupedItems = useMemo(() => {
-    const sorted = sortDraftItems(draftItems);
+    const sorted = sortDraftItems(draftItems).map((item, index) => ({ item, index }));
     return {
-      certain: sorted.filter((item) => item.confidence >= LOW_CONFIDENCE_CUTOFF),
-      doubleCheck: sorted.filter((item) => item.confidence < LOW_CONFIDENCE_CUTOFF),
+      certain: sorted.filter(({ item }) => item.confidence >= LOW_CONFIDENCE_CUTOFF),
+      doubleCheck: sorted.filter(({ item }) => item.confidence < LOW_CONFIDENCE_CUTOFF),
     };
   }, [draftItems]);
 
@@ -262,45 +275,55 @@ export default function Home() {
     }
   }
 
-  function handleQuantityChange(ingredientId: string, quantity: PantryItem["quantity"]) {
+  function handleQuantityChange(indexToUpdate: number, quantity: PantryItem["quantity"]) {
     replaceDraftItems(
-      draftItems.map((item) =>
-        item.ingredientId === ingredientId ? { ...item, quantity } : item
+      draftItems.map((item, index) =>
+        index === indexToUpdate ? { ...item, quantity } : item
       )
     );
   }
 
-  function handleRemove(ingredientId: string) {
-    replaceDraftItems(draftItems.filter((item) => item.ingredientId !== ingredientId));
+  function handleRemove(indexToRemove: number) {
+    replaceDraftItems(draftItems.filter((_, index) => index !== indexToRemove));
   }
 
   function handleManualAdd() {
-    const ingredientId = findIngredientId(manualInput);
-    if (!ingredientId) {
-      setStatus("Jeg kender ikke den vare endnu. Prøv fx mælk, ris, kylling eller revet ost.");
+    const rawLabel = manualInput.trim();
+    if (!rawLabel) {
+      setStatus("Skriv en vare først.");
       return;
     }
 
-    if (draftItems.some((item) => item.ingredientId === ingredientId)) {
-      setStatus(`${displayIngredient(ingredientId)} står allerede på listen.`);
+    const ingredientId = findIngredientId(rawLabel);
+    const duplicate = draftItems.some((item) =>
+      ingredientId
+        ? item.ingredientId === ingredientId
+        : !item.ingredientId && normalizeIngredientLookup(item.rawLabel) === normalizeIngredientLookup(rawLabel)
+    );
+
+    if (duplicate) {
+      setStatus(`${ingredientId ? displayIngredient(ingredientId) : rawLabel} står allerede på listen.`);
       setManualInput("");
       return;
     }
 
     const seenAt = lastScanAt ?? new Date().toISOString();
+    const nextItem: PantryItem = {
+      rawLabel,
+      ingredientId,
+      quantity: "noget",
+      confidence: 1,
+      source: "onboarding",
+      seenAt,
+    };
+
     replaceDraftItems([
       ...draftItems,
-      {
-        ingredientId,
-        quantity: "noget",
-        confidence: 1,
-        source: "onboarding",
-        seenAt,
-      },
+      nextItem,
     ]);
     setLastScanAt(seenAt);
     setManualInput("");
-    setStatus(`${displayIngredient(ingredientId)} er lagt til.`);
+    setStatus(`${displayPantryItem(nextItem)} er lagt til.`);
   }
 
   function handleSuggest() {
@@ -456,11 +479,11 @@ export default function Home() {
                     <div className="review-block">
                       <p className="list-label">Ser rigtigt ud</p>
                       <div className="ingredient-list">
-                        {groupedItems.certain.map((item) => (
-                          <article className="ingredient-card" key={item.ingredientId}>
+                        {groupedItems.certain.map(({ item, index }) => (
+                          <article className="ingredient-card" key={`${item.ingredientId ?? item.rawLabel}-${index}`}>
                             <div className="ingredient-copy">
-                              <strong>{displayIngredient(item.ingredientId)}</strong>
-                              <span>{item.source === "onboarding" ? "lagt til af dig" : "fra billederne"}</span>
+                              <strong>{displayPantryItem(item)}</strong>
+                              <span>{pantrySourceLabel(item)}</span>
                             </div>
                             <div className="ingredient-actions">
                               <select
@@ -468,7 +491,7 @@ export default function Home() {
                                 value={item.quantity}
                                 onChange={(event) =>
                                   handleQuantityChange(
-                                    item.ingredientId,
+                                    index,
                                     event.target.value as PantryItem["quantity"]
                                   )
                                 }
@@ -480,7 +503,7 @@ export default function Home() {
                               <button
                                 type="button"
                                 className="remove-button"
-                                onClick={() => handleRemove(item.ingredientId)}
+                                onClick={() => handleRemove(index)}
                               >
                                 Fjern
                               </button>
@@ -495,10 +518,10 @@ export default function Home() {
                     <div className="review-block warning-block">
                       <p className="list-label">Tjek lige de her</p>
                       <div className="ingredient-list">
-                        {groupedItems.doubleCheck.map((item) => (
-                          <article className="ingredient-card warning-card" key={item.ingredientId}>
+                        {groupedItems.doubleCheck.map(({ item, index }) => (
+                          <article className="ingredient-card warning-card" key={`${item.ingredientId ?? item.rawLabel}-${index}`}>
                             <div className="ingredient-copy">
-                              <strong>{displayIngredient(item.ingredientId)}</strong>
+                              <strong>{displayPantryItem(item)}</strong>
                               <span>jeg er ikke helt sikker på den</span>
                             </div>
                             <div className="ingredient-actions">
@@ -507,7 +530,7 @@ export default function Home() {
                                 value={item.quantity}
                                 onChange={(event) =>
                                   handleQuantityChange(
-                                    item.ingredientId,
+                                    index,
                                     event.target.value as PantryItem["quantity"]
                                   )
                                 }
@@ -519,7 +542,7 @@ export default function Home() {
                               <button
                                 type="button"
                                 className="remove-button"
-                                onClick={() => handleRemove(item.ingredientId)}
+                                onClick={() => handleRemove(index)}
                               >
                                 Fjern
                               </button>

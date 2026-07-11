@@ -36,7 +36,8 @@ export type Supermarket =
 export type QuantityEstimate = "rigeligt" | "noget" | "lidt";
 
 export interface PantryItem {
-  ingredientId: string;           // normaliseret mod INGREDIENT_VOCABULARY
+  rawLabel: string;               // det modellen eller brugeren faktisk kaldte varen
+  ingredientId: string | null;    // kanonisk registry-id, hvis vi kan mappe sikkert
   quantity: QuantityEstimate;
   confidence: number;             // 0–1, falder over tid (decay i pantry.ts)
   source: "scan" | "deduction" | "onboarding";
@@ -96,12 +97,13 @@ export interface Recipe {
 
 export interface ScanAnalysisRequest {
   frames: string[];               // 2–4 base64 JPEG, client-side udtrukket
-  vocabulary: string[];           // INGREDIENT_VOCABULARY — tvinger normalisering
+  vocabulary: string[];           // kanoniske ingrediens-id'er fra registry
 }
 
 export interface ScanAnalysisResponse {
   items: {
-    ingredientId: string;         // SKAL findes i vocabulary — ellers kasseres
+    rawLabel: string;             // frit fund, fx "Heinz ketchup, halv flaske"
+    ingredientId: string | null;  // registry-id hvis sikkert match, ellers null
     quantity: QuantityEstimate;
     confidence: number;           // 0–1
   }[];
@@ -186,7 +188,7 @@ export const INGREDIENT_VOCABULARY_SAMPLE = [
 /* ------------------------------------------------------------------ */
 
 export interface VisionProvider {
-  /** Analyserer køleskabsbilleder. Output er ALTID normaliseret mod vocabulary. */
+  /** Analyserer køleskabsbilleder. Output bærer både rawLabel og evt. kanonisk mapping. */
   analyze(req: ScanAnalysisRequest): Promise<ScanAnalysisResponse>;
 }
 

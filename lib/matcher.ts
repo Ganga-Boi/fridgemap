@@ -47,7 +47,10 @@ export function effectiveConfidence(item: PantryItem, nowIso: string): number {
 
 function pantryIndex(pantry: Pantry): Map<string, PantryItem> {
   const m = new Map<string, PantryItem>();
-  for (const item of pantry.items) m.set(item.ingredientId, item);
+  for (const item of pantry.items) {
+    if (!item.ingredientId) continue;
+    m.set(item.ingredientId, item);
+  }
   return m;
 }
 

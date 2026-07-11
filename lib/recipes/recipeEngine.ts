@@ -4,7 +4,10 @@
  * en ret der ikke består validate(), kan aldrig få approved=true.
  */
 import type { Recipe } from "../../types/contracts";
+import { buildIngredientRegistry } from "../ingredientRegistry";
 import { SEED_RECIPES } from "./recipes";
+
+const INGREDIENT_REGISTRY = buildIngredientRegistry();
 
 export function allApprovedRecipes(): Recipe[] {
   return SEED_RECIPES.filter((r) => r.approved);
@@ -24,6 +27,9 @@ export function validateRecipe(r: Recipe): ValidationError[] {
 
   const ids = r.ingredients.map((i) => i.ingredientId);
   if (new Set(ids).size !== ids.length) err("dublet-ingrediens");
+  if (ids.some((ingredientId) => !INGREDIENT_REGISTRY.hasIngredientId(ingredientId))) {
+    err("ukendt ingrediens-id i registry");
+  }
 
   return errors;
 }

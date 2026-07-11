@@ -16,11 +16,13 @@ import type {
   ScanAnalysisResponse,
   VisionProvider,
 } from "../../../types/contracts";
+import { buildIngredientRegistry, normalizeIngredientLookup } from "../../ingredientRegistry";
 import { getOpenAIKey } from "./openaiConfig";
 
 /* ---------------- OpenAI-implementering ----------------------------- */
 
 const MAX_IMAGES = 4;
+const INGREDIENT_REGISTRY = buildIngredientRegistry();
 
 export class OpenAIVisionProvider implements VisionProvider {
   async analyze(req: ScanAnalysisRequest): Promise<ScanAnalysisResponse> {
@@ -29,11 +31,16 @@ export class OpenAIVisionProvider implements VisionProvider {
 
     const system = [
       "Du analyserer billeder af et køleskab og identificerer madvarer.",
-      "Du må KUN bruge ingrediens-id'er fra denne liste (alt andet kasseres):",
+      "Detekter frit det du faktisk ser: emballage, mærkevarer, rester, glas, flasker og halve varer.",
+      "Hvis du kan mappe et fund sikkert til et ingrediens-id fra denne liste, så brug det.",
+      "Hvis du IKKE kan mappe sikkert, skal ingredientId være null. Gæt ALDRIG en nabo-ingrediens.",
+      "Brug rawLabel til det du faktisk ser på billedet, også når ingredientId er null.",
+      "Mulige ingrediens-id'er:",
       req.vocabulary.join(", "),
       "",
       "Returnér KUN gyldig JSON efter dette skema, ingen forklaring, ingen markdown:",
-      '{ "items": [ { "ingredientId": "<id fra listen>",',
+      '{ "items": [ { "rawLabel": "<det du ser>",',
+      '               "ingredientId": "<id fra listen>" | null,',
       '               "quantity": "rigeligt" | "noget" | "lidt",',
       '               "confidence": <tal 0-1> } ] }',
     ].join("\n");
@@ -96,9 +103,9 @@ function extractOutputText(data: any): string {
 }
 
 /* ---------------- Kontrakt-validering ------------------------------- */
-/* Modeloutput er upålideligt input. Alt valideres, alt ukendt kasseres. */
+/* Modeloutput er upålideligt input. Alt valideres, men ukendte fund må bevares. */
 
-function parseAndValidate(text: string, vocabulary: string[]): ScanAnalysisResponse {
+export function parseAndValidate(text: string, vocabulary: string[]): ScanAnalysisResponse {
   const vocab = new Set(vocabulary);
   const clean = text.replace(/```json|```/g, "").trim();
 
@@ -114,9 +121,22 @@ function parseAndValidate(text: string, vocabulary: string[]): ScanAnalysisRespo
   const seen = new Set<string>();
 
   for (const it of rawItems) {
-    const id = typeof it?.ingredientId === "string" ? it.ingredientId : "";
-    if (!vocab.has(id) || seen.has(id)) continue; // vokabular-tvang + dedup
-    seen.add(id);
+    const providerRawLabel = typeof it?.rawLabel === "string" ? it.rawLabel.trim() : "";
+    const providerIngredientId = typeof it?.ingredientId === "string" ? it.ingredientId.trim() : "";
+    const ingredientId = vocab.has(providerIngredientId)
+      ? providerIngredientId
+      : providerRawLabel
+        ? INGREDIENT_REGISTRY.findIngredientId(providerRawLabel)
+        : null;
+
+    const rawLabel = providerRawLabel || (ingredientId ? INGREDIENT_REGISTRY.displayIngredient(ingredientId) : "");
+    if (!rawLabel) continue;
+
+    const dedupeKey = ingredientId
+      ? `id:${ingredientId}`
+      : `raw:${normalizeIngredientLookup(rawLabel)}`;
+    if (!dedupeKey || seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
 
     const q = it?.quantity;
     const quantity = q === "rigeligt" || q === "noget" || q === "lidt" ? q : "noget";
@@ -124,7 +144,7 @@ function parseAndValidate(text: string, vocabulary: string[]): ScanAnalysisRespo
     const c = Number(it?.confidence);
     const confidence = Number.isFinite(c) ? Math.min(1, Math.max(0, c)) : 0.5;
 
-    items.push({ ingredientId: id, quantity, confidence });
+    items.push({ rawLabel, ingredientId, quantity, confidence });
   }
 
   return { items };

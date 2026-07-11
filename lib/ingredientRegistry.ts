@@ -1,35 +1,54 @@
 import type { Recipe } from "../types/contracts";
 
-type ExtraPantryIngredient = {
+export interface IngredientDefinition {
   ingredientId: string;
   displayName: string;
   aliases: string[];
-};
+}
 
-const EXTRA_PANTRY_INGREDIENTS: ExtraPantryIngredient[] = [
-  {
-    ingredientId: "ketchup",
-    displayName: "ketchup",
-    aliases: ["ketchup", "tomatketchup", "tomat ketchup"],
-  },
+const CANONICAL_INGREDIENTS: IngredientDefinition[] = [
+  { ingredientId: "aeg", displayName: "æg", aliases: ["aeg", "ag"] },
+  { ingredientId: "agurk", displayName: "agurk", aliases: ["agurk", "cucumber"] },
+  { ingredientId: "bacon", displayName: "bacon", aliases: ["bacon"] },
+  { ingredientId: "broccoli", displayName: "broccoli", aliases: ["broccoli"] },
+  { ingredientId: "bouillon_terning", displayName: "bouillonterning", aliases: ["bouillon", "bouillonterning", "terning bouillon"] },
+  { ingredientId: "creme_fraiche", displayName: "creme fraiche", aliases: ["creme fraiche", "cremefraiche"] },
+  { ingredientId: "floede", displayName: "fløde", aliases: ["floede", "flode", "madlavningsflode", "piskeflode"] },
+  { ingredientId: "gulerod", displayName: "gulerod", aliases: ["gulerod", "gulerodder"] },
+  { ingredientId: "hakket_oksekoed", displayName: "hakket oksekød", aliases: ["hakket oksekoed", "oksekoed", "hakkekod", "minced beef"] },
+  { ingredientId: "hvedemel", displayName: "hvedemel", aliases: ["hvedemel", "mel"] },
+  { ingredientId: "hvidloeg", displayName: "hvidløg", aliases: ["hvidloeg", "hvidlog"] },
+  { ingredientId: "karrypasta", displayName: "karry", aliases: ["karry", "karrypasta", "curry paste"] },
+  { ingredientId: "kartofler", displayName: "kartofler", aliases: ["kartofler", "kartoffel", "poteter", "potato"] },
+  { ingredientId: "ketchup", displayName: "ketchup", aliases: ["ketchup", "tomatketchup", "tomat ketchup", "heinz ketchup", "heinz"] },
+  { ingredientId: "kokosmaelk", displayName: "kokosmælk", aliases: ["kokosmaelk", "coconut milk"] },
+  { ingredientId: "kyllingebryst", displayName: "kyllingebryst", aliases: ["kylling", "kyllingebryst", "kyllingefilet"] },
+  { ingredientId: "loeg", displayName: "løg", aliases: ["loeg", "log", "gule log"] },
+  { ingredientId: "maelk", displayName: "mælk", aliases: ["maelk", "milk"] },
+  { ingredientId: "mayonnaise", displayName: "mayonnaise", aliases: ["mayonnaise", "mayo"] },
+  { ingredientId: "mozzarella_frisk", displayName: "mozzarella", aliases: ["mozzarella", "frisk mozzarella", "mozarella"] },
+  { ingredientId: "parmesan", displayName: "parmesan", aliases: ["parmesan"] },
+  { ingredientId: "pasta_skruer", displayName: "pastaskruer", aliases: ["pastaskruer", "pasta skruer", "fusilli"] },
+  { ingredientId: "peberfrugt", displayName: "peberfrugt", aliases: ["peberfrugt", "bell pepper"] },
+  { ingredientId: "pesto", displayName: "pesto", aliases: ["pesto", "gron pesto", "groen pesto", "rod pesto"] },
+  { ingredientId: "remoulade", displayName: "remoulade", aliases: ["remoulade"] },
+  { ingredientId: "revet_ost", displayName: "revet ost", aliases: ["revet ost", "ost", "revet mozzarella", "revet cheddar"] },
+  { ingredientId: "ris", displayName: "ris", aliases: ["ris", "rice"] },
+  { ingredientId: "salami", displayName: "salami", aliases: ["salami"] },
+  { ingredientId: "sennep", displayName: "sennep", aliases: ["sennep", "mustard"] },
+  { ingredientId: "skinke", displayName: "skinke", aliases: ["skinke", "ham"] },
+  { ingredientId: "skyr", displayName: "skyr", aliases: ["skyr"] },
+  { ingredientId: "smoer", displayName: "smør", aliases: ["smoer", "smor", "butter", "lurpak"] },
+  { ingredientId: "smoereost", displayName: "smøreost", aliases: ["smoereost", "philadelphia", "cream cheese"] },
+  { ingredientId: "spaghetti", displayName: "spaghetti", aliases: ["spaghetti"] },
+  { ingredientId: "tomat_frisk", displayName: "tomat", aliases: ["tomat", "tomater", "friske tomater"] },
+  { ingredientId: "tomat_haakket_daase", displayName: "hakkede tomater", aliases: ["hakkede tomater", "tomater pa daase", "tomat paa daase", "daasetomater"] },
+  { ingredientId: "yoghurt", displayName: "yoghurt", aliases: ["yoghurt", "yoghurt naturel"] },
 ];
 
-const COMMON_ALIASES: Record<string, string> = {
-  aeg: "aeg",
-  loeg: "loeg",
-  hvidloeg: "hvidloeg",
-  floede: "floede",
-  maelk: "maelk",
-  smoer: "smoer",
-  ost: "revet_ost",
-  tomat: "tomat_frisk",
-  tomater: "tomat_frisk",
-  kylling: "kyllingebryst",
-  oksekoed: "hakket_oksekoed",
-  "hakket oksekoed": "hakket_oksekoed",
-};
+const INGREDIENTS_BY_ID = new Map(CANONICAL_INGREDIENTS.map((ingredient) => [ingredient.ingredientId, ingredient]));
 
-function normalizeIngredientLookup(value: string) {
+export function normalizeIngredientLookup(value: string) {
   return value
     .trim()
     .toLowerCase()
@@ -49,22 +68,12 @@ function registerLookup(inputToId: Map<string, string>, alias: string, ingredien
   inputToId.set(key, ingredientId);
 }
 
-export function buildIngredientRegistry(recipes: Recipe[]) {
-  const displayNameById = new Map<string, string>();
+export function buildIngredientRegistry(_recipes?: Recipe[]) {
   const inputToId = new Map<string, string>();
 
-  for (const recipe of recipes) {
-    for (const ingredient of recipe.ingredients) {
-      displayNameById.set(ingredient.ingredientId, ingredient.displayName);
-      registerLookup(inputToId, ingredient.ingredientId, ingredient.ingredientId);
-      registerLookup(inputToId, ingredient.ingredientId.replace(/_/g, " "), ingredient.ingredientId);
-      registerLookup(inputToId, ingredient.displayName, ingredient.ingredientId);
-    }
-  }
-
-  for (const ingredient of EXTRA_PANTRY_INGREDIENTS) {
-    displayNameById.set(ingredient.ingredientId, ingredient.displayName);
+  for (const ingredient of CANONICAL_INGREDIENTS) {
     registerLookup(inputToId, ingredient.ingredientId, ingredient.ingredientId);
+    registerLookup(inputToId, ingredient.ingredientId.replace(/_/g, " "), ingredient.ingredientId);
     registerLookup(inputToId, ingredient.displayName, ingredient.ingredientId);
 
     for (const alias of ingredient.aliases) {
@@ -72,14 +81,14 @@ export function buildIngredientRegistry(recipes: Recipe[]) {
     }
   }
 
-  for (const [alias, ingredientId] of Object.entries(COMMON_ALIASES)) {
-    registerLookup(inputToId, alias, ingredientId);
-  }
-
   return {
-    ingredientIds: [...displayNameById.keys()].sort(),
+    ingredientIds: [...INGREDIENTS_BY_ID.keys()].sort(),
+    definitions: [...CANONICAL_INGREDIENTS],
+    hasIngredientId(ingredientId: string) {
+      return INGREDIENTS_BY_ID.has(ingredientId);
+    },
     displayIngredient(ingredientId: string) {
-      return displayNameById.get(ingredientId) ?? ingredientId.replace(/_/g, " ");
+      return INGREDIENTS_BY_ID.get(ingredientId)?.displayName ?? ingredientId.replace(/_/g, " ");
     },
     findIngredientId(value: string) {
       return inputToId.get(normalizeIngredientLookup(value)) ?? null;
@@ -87,6 +96,6 @@ export function buildIngredientRegistry(recipes: Recipe[]) {
   };
 }
 
-export function buildIngredientVocabulary(recipes: Recipe[]) {
-  return buildIngredientRegistry(recipes).ingredientIds;
+export function buildIngredientVocabulary(_recipes?: Recipe[]) {
+  return [...INGREDIENTS_BY_ID.keys()].sort();
 }

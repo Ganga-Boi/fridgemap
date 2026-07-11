@@ -10,8 +10,9 @@ import type { Pantry, PantryItem, Household } from "../types/contracts";
 
 const NOW = "2026-07-10T16:30:00.000Z";
 
-function item(ingredientId: string, overrides: Partial<PantryItem> = {}): PantryItem {
+ function item(ingredientId: string | null, overrides: Partial<PantryItem> = {}): PantryItem {
   return {
+    rawLabel: overrides.rawLabel ?? ingredientId ?? "ukendt vare",
     ingredientId,
     quantity: "noget",
     confidence: 0.9,
@@ -156,6 +157,22 @@ describe("buildAnswer — copyKeys (konfidens oversættes, vises aldrig)", () =>
     };
     const a = buildAnswer(SEED_RECIPES[0], pantry, NOW);
     expect(a.copyKey).toBe("tjek_lige");
+  });
+
+  it("ignorerer ukendte pantry-fund i matching uden at knække svaret", () => {
+    const pantry: Pantry = {
+      items: [
+        item("kyllingebryst"),
+        item("pasta_skruer"),
+        item("floede"),
+        item(null, { rawLabel: "Heinz ketchup" }),
+      ],
+      lastScanAt: NOW,
+      deductions: [],
+    };
+
+    const a = buildAnswer(SEED_RECIPES[0], pantry, NOW);
+    expect(a.copyKey).toBe("springer_over");
   });
 });
 
