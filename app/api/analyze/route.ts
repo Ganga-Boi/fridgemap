@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { getVisionProvider } from "../../../lib/providers/vision";
-import { getOpenAIKeyDiagnostics } from "../../../lib/providers/vision/openaiConfig";
+import { getVisionProvider, getVisionProviderDiagnostics } from "../../../lib/providers/vision";
 import { buildVocabulary } from "../../../lib/vocabulary";
 
 export const runtime = "nodejs";
@@ -16,7 +15,7 @@ export async function GET() {
     message: "FRIDGEMAP_SCAN_READY",
     vocabularySize: buildVocabulary().length,
     diagnostics: {
-      ...getOpenAIKeyDiagnostics(),
+      ...getVisionProviderDiagnostics(),
       vercelEnv: process.env.VERCEL_ENV ?? null,
       nodeEnv: process.env.NODE_ENV ?? null,
     },
@@ -54,6 +53,14 @@ export async function POST(request: Request) {
       return json({
         ok: false,
         error: "OPENAI_API_KEY_MISSING",
+        details,
+      });
+    }
+
+    if (details.includes("ANTHROPIC_API_KEY")) {
+      return json({
+        ok: false,
+        error: "ANTHROPIC_API_KEY_MISSING",
         details,
       });
     }

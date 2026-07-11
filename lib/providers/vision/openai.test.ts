@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { buildIngredientVocabulary } from "../../ingredientRegistry";
-import { parseAndValidate } from "./openai";
+import { parseAndValidateVisionResponse } from "./scanContract";
 
 const VOCABULARY = buildIngredientVocabulary();
 
 describe("parseAndValidate", () => {
   it("bevarer ukendte fund som rawLabel med null ingredientId", () => {
-    const result = parseAndValidate(
+    const result = parseAndValidateVisionResponse(
       JSON.stringify({
         items: [
           {
@@ -31,7 +31,7 @@ describe("parseAndValidate", () => {
   });
 
   it("bruger lokal registry-mapping naar rawLabel matcher et alias", () => {
-    const result = parseAndValidate(
+    const result = parseAndValidateVisionResponse(
       JSON.stringify({
         items: [
           {

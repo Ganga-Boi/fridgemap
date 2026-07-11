@@ -153,6 +153,8 @@ function errorMessage(error: string | undefined) {
   switch (error) {
     case "OPENAI_API_KEY_MISSING":
       return "Jeg mangler stadig nøglen til billedforståelsen i produktion.";
+    case "ANTHROPIC_API_KEY_MISSING":
+      return "Jeg mangler stadig Claude-nøglen til billedforståelsen i produktion.";
     case "VISION_JSON_PARSE_ERROR":
       return "Jeg kunne ikke læse svaret rent nok denne gang. Prøv gerne igen med 2-4 tydelige billeder.";
     case "NO_FRAMES":
