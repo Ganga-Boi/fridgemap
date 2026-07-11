@@ -158,6 +158,16 @@ export default function Home() {
         return;
       }
 
+      if (result.message === "OPENAI_API_KEY_MISSING") {
+        setSafe([]);
+        setUnsure([]);
+        setNonFood([]);
+        setTruth([]);
+        setRecipeData(null);
+        setStatus("Scanningen er klar i appen, men OPENAI_API_KEY mangler i Vercel. Tilføj nøglen under Settings -> Environment Variables.");
+        return;
+      }
+
       setFromAnalysis(result);
       setStatus("Forslag klar. Ret listen og klik “Foreslå retter”.");
     } catch (error) {
