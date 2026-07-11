@@ -1,27 +1,14 @@
 /**
- * COPY — tonekontrakten. AL brugerrettet tekst bor HER og kun her.
- * ================================================================
- * Regler (fra fundamentet), håndhævet ved konvention + review:
- *  - Ordene "AI", "scan", "lager", "analyse", "konfidens" optræder ALDRIG.
- *  - Appen bebrejder aldrig. Ingen skyld, ingen løftede pegefingre.
- *  - Varme gennem adfærd, ikke pynt: ingen emojis i faste tekster,
- *    ingen "min ven". Rolig, konkret, kortfattet.
- *  - Lav sikkerhed formuleres som en mikro-handling ("tjek lige"),
- *    aldrig som usikkerhed eller tal.
- *  - Én sætning gør ét job.
+ * COPY — tonekontrakten. Al brugerrettet tekst bor her.
  */
 
 import type { Answer } from "../types/contracts";
-
-/* ---------------- Dato-øjenbryn ------------------------------------- */
 
 export function dateEyebrow(now: Date): string {
   return now
     .toLocaleDateString("da-DK", { weekday: "long", day: "numeric", month: "long" })
     .toLowerCase();
 }
-
-/* ---------------- Svaret --------------------------------------------- */
 
 export function headline(recipeName: string): string {
   return `Jeg ville lave ${recipeName.toLowerCase()} i dag.`;
@@ -31,9 +18,9 @@ export function minutesLine(minutes: number): string {
   return `${minutes} minutter`;
 }
 
-/** Underlinjen — oversættelsen af copyKey. Konfidens bliver til sprog her. */
 export function statusLine(answer: Answer): string {
   const names = answer.missing.map((i) => i.displayName);
+
   switch (answer.copyKey) {
     case "har_det_hele":
       return "I har det hele.";
@@ -53,35 +40,40 @@ function liste(names: string[]): string {
   return `${names.slice(0, -1).join(", ")} og ${names[names.length - 1]}`;
 }
 
-/* ---------------- Knapper -------------------------------------------- */
-
 export const BUTTONS = {
   showRecipe: "Vis retten",
   somethingElse: "Noget andet",
   surprise: "Overrask mig",
   madeIt: "Vi lavede den",
   tryAgain: "Tag en ny runde",
+  inspectPhotos: "Se hvad jeg fandt",
+  useGallery: "Brug billeder du allerede har",
 } as const;
 
 export const LOADING_HEADLINE = "Et øjeblik.";
 
-/* ---------------- Grænsetilstande ------------------------------------ */
+export const ONBOARDING_LEAD =
+  "Tag 2-4 billeder af hylderne. Så samler jeg varerne og giver ét konkret bud.";
 
-/** Efter 3 × "noget andet": lageret er nok forkert — foreslå kalibrering. */
+export const CAMERA_HELP =
+  "Start med køleskabet. Brug kun billeder du allerede har, hvis de ligger på telefonen.";
+
+export const SCAN_TIPS = [
+  "Én hylde ad gangen",
+  "Godt lys",
+  "Hele fronten med",
+] as const;
+
 export const OUT_OF_IDEAS =
   "Hm. Skal vi tage et hurtigt kig i køleskabet i stedet? Så rammer jeg bedre.";
 
-/** Tomt/umuligt lager: aldrig en fejlmeddelelse, altid en invitation. */
-export const EMPTY_PANTRY =
-  "Jeg har ikke set jeres køleskab endnu. Tag et hurtigt kig med mig, så finder jeg noget til i aften.";
+export const EMPTY_PANTRY = "Når billederne er taget, samler jeg varerne her.";
 
-/** Kvittering efter "vi lavede den" — kort, varm, færdig. */
 export const MADE_IT_RECEIPT = "Godt. Vi ses i morgen.";
 
-/* ---------------- Dagen-efter-spørgsmålet (bruges fra trin 4) -------- */
-/** Erstatter "vi lavede den"-knappen: ét tryk morgenen efter, ja er default. */
 export function madeItQuestion(recipeName: string): string {
   return `Blev det til ${recipeName.toLowerCase()} i går?`;
 }
+
 export const MADE_IT_YES = "Ja";
 export const MADE_IT_NO = "Nej, det blev noget andet";

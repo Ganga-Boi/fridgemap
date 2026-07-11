@@ -2,7 +2,16 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import AnswerCard from "../components/AnswerCard";
-import { BUTTONS, EMPTY_PANTRY, OUT_OF_IDEAS, statusLine } from "../lib/copy";
+import {
+  BUTTONS,
+  CAMERA_HELP,
+  EMPTY_PANTRY,
+  LOADING_HEADLINE,
+  ONBOARDING_LEAD,
+  OUT_OF_IDEAS,
+  SCAN_TIPS,
+  statusLine,
+} from "../lib/copy";
 import {
   MAX_REJECTIONS,
   applyEveningRule,
@@ -154,15 +163,15 @@ function mergeSelectedFiles(current: File[], incoming: File[]) {
 function fileSummary(files: File[]) {
   switch (files.length) {
     case 0:
-      return "Ingen billeder endnu. Brug kameraet på telefonen og tag første billede.";
+      return "Ingen billeder endnu. Tag første billede.";
     case 1:
       return "1 billede klar. Tag gerne 1-3 mere fra andre vinkler.";
     case 2:
-      return "2 billeder klar. Det er et godt startpunkt - tag 1-2 mere hvis noget ligger skjult.";
+      return "2 billeder klar. Det er et godt startpunkt.";
     case 3:
-      return "3 billeder klar. Du kan tage ét mere, hvis der er en hylde jeg ikke ser endnu.";
+      return "3 billeder klar. Du kan tage ét mere.";
     default:
-      return "4 billeder klar. Jeg har nok til at kigge i køleskabet.";
+      return "4 billeder klar. Jeg har nok.";
   }
 }
 
@@ -184,9 +193,9 @@ function errorMessage(error: string | undefined) {
     case "ANTHROPIC_API_KEY_MISSING":
       return "Jeg mangler stadig Claude-nøglen til billedforståelsen i produktion.";
     case "VISION_JSON_PARSE_ERROR":
-      return "Jeg kunne ikke læse svaret rent nok denne gang. Prøv gerne igen med 2-4 tydelige billeder.";
+      return "Jeg kunne ikke læse billederne rent nok denne gang. Prøv gerne igen med 2-4 tydelige billeder.";
     case "NO_FRAMES":
-      return "Vælg mindst ét billede først.";
+      return "Tag mindst ét billede først.";
     default:
       return "Der gik noget galt. Prøv gerne igen om et øjeblik.";
   }
@@ -418,7 +427,7 @@ export default function Home() {
 
   async function handleScan() {
     if (!files.length) {
-      setStatus("Vælg mindst ét billede først.");
+      setStatus("Tag mindst ét billede først.");
       return;
     }
 
@@ -446,11 +455,11 @@ export default function Home() {
       setSuggestionState(createInitialSuggestionState());
 
       if (nextItems.length === 0) {
-        setStatus("Jeg fandt ikke nok endnu. Tilføj gerne et par ting selv nedenfor.");
+        setStatus("Jeg fandt ikke nok endnu. Tilføj gerne et par ting selv.");
         return;
       }
 
-      setStatus("Jeg fandt noget. Ret listen, og få et stærkt bud til i aften.");
+      setStatus("Jeg fandt noget. Ret listen, så giver jeg et konkret bud.");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setStatus(`Fejl: ${message}`);
@@ -599,10 +608,7 @@ export default function Home() {
         <div className="brand-copy">
           <p className="kicker">FridgeMap</p>
           <h1>Tag billeder af køleskabet. Få ét godt bud til aftensmad.</h1>
-          <p className="lead">
-            Først finder vi varerne. Så retter du listen. Til sidst får du en ret og
-            hvad der eventuelt mangler.
-          </p>
+          <p className="lead">{ONBOARDING_LEAD}</p>
         </div>
       </div>
 
@@ -612,6 +618,11 @@ export default function Home() {
             <div>
               <p className="panel-label">1. Kig i køleskabet</p>
               <h2>Start med 2-4 tydelige billeder</h2>
+              <ul className="scan-tips">
+                {SCAN_TIPS.map((tip) => (
+                  <li key={tip}>{tip}</li>
+                ))}
+              </ul>
             </div>
             <button type="button" className="quiet-button" onClick={resetAll}>
               Ny runde
@@ -622,10 +633,7 @@ export default function Home() {
             <div className="file-picker camera-picker">
               <div className="camera-copy">
                 <span>Brug kameraet på telefonen</span>
-              <p className="camera-hint">
-                Åbn kameraet direkte her, tag 2-4 billeder af hylderne, og brug kun galleriet
-                hvis du allerede har taget dem.
-              </p>
+                <p className="camera-hint">{CAMERA_HELP}</p>
               </div>
               {cameraOpen ? (
                 <div className="camera-live">
@@ -668,7 +676,7 @@ export default function Home() {
                   </button>
 
                   <label className="quiet-button picker-fallback">
-                    <span>Vælg fra galleri</span>
+                    <span>{BUTTONS.useGallery}</span>
                     <input
                       ref={galleryInputRef}
                       type="file"
@@ -705,8 +713,13 @@ export default function Home() {
               ) : null}
             </div>
 
-            <button type="button" className="cta-button" onClick={handleScan} disabled={loading}>
-              {loading ? "Et øjeblik" : "Find det i køleskabet"}
+            <button
+              type="button"
+              className="cta-button"
+              onClick={handleScan}
+              disabled={loading || files.length === 0}
+            >
+              {loading ? LOADING_HEADLINE : BUTTONS.inspectPhotos}
             </button>
           </div>
 
@@ -724,7 +737,7 @@ export default function Home() {
               <div className="section-head">
                 <div>
                   <p className="panel-label">2. Tjek listen</p>
-                  <h3>Det her vil jeg regne med</h3>
+                  <h3>{draftItems.length > 0 ? "Det her ser jeg" : "Varerne lander her"}</h3>
                 </div>
                 {draftItems.length > 0 ? (
                   <button type="button" className="quiet-button" onClick={handleSuggest}>
@@ -849,10 +862,9 @@ export default function Home() {
 
               {!currentAnswer ? (
                 <div className="hero-empty">
-                  <h3>Et godt bud lander her</h3>
+                  <h3>Buddet kommer her</h3>
                   <p>
-                    Når listen ser rigtig ud, får du ét tydeligt forslag med det samme
-                    plus hvad der eventuelt mangler.
+                    Når listen ser rigtig ud, får du ét konkret forslag og det, der eventuelt mangler.
                   </p>
                 </div>
               ) : hitLimit ? (
