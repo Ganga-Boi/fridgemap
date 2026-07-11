@@ -222,6 +222,15 @@ button {
   color: var(--muted);
 }
 
+.camera-picker {
+  gap: 14px;
+}
+
+.camera-copy {
+  display: grid;
+  gap: 8px;
+}
+
 .camera-hint {
   margin: 0 0 4px;
   font-size: 0.95rem;
@@ -229,8 +238,77 @@ button {
   color: var(--muted);
 }
 
-.file-picker input[type="file"] {
-  max-width: 100%;
+.camera-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.camera-live {
+  display: grid;
+  gap: 12px;
+}
+
+.camera-preview {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: var(--radius-lg);
+  background: rgba(23, 52, 56, 0.12);
+  border: 1px solid var(--line);
+}
+
+.picker-fallback {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 54px;
+  overflow: hidden;
+}
+
+.picker-fallback input,
+.sr-only-input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.camera-error {
+  margin: 0;
+  color: var(--danger-ink);
+  line-height: 1.45;
+}
+
+.capture-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+}
+
+.capture-card {
+  display: grid;
+  gap: 8px;
+}
+
+.capture-thumb {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(23, 52, 56, 0.08);
+}
+
+.capture-remove {
+  min-height: 40px;
+  padding: 0 0.9rem;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--brand-deep);
+  border: 1px solid var(--line);
+  cursor: pointer;
 }
 
 .helper-text,
@@ -626,6 +704,7 @@ button {
 
   .ingredient-actions,
   .scan-controls,
+  .camera-actions,
   .manual-row,
   .out-of-ideas-actions,
   .secondary-row {

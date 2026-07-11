@@ -193,7 +193,9 @@ function errorMessage(error: string | undefined) {
 }
 
 export default function Home() {
-  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const galleryInputRef = useRef<HTMLInputElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const recipeRef = useRef<HTMLElement | null>(null);
 
   const [files, setFiles] = useState<File[]>([]);
@@ -204,6 +206,9 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [manualInput, setManualInput] = useState("");
   const [ingredientsDirty, setIngredientsDirty] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraBusy, setCameraBusy] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const [showRecipe, setShowRecipe] = useState(false);
   const [suggestionState, setSuggestionState] = useState(createInitialSuggestionState());
 
@@ -233,10 +238,25 @@ export default function Home() {
         .slice(0, 3)
     : [];
   const hitLimit = suggestionState.rejections >= MAX_REJECTIONS;
+  const filePreviews = useMemo(
+    () =>
+      files.map((file, index) => ({
+        id: `${file.name}-${file.lastModified}-${index}`,
+        name: file.name,
+        url: URL.createObjectURL(file),
+      })),
+    [files]
+  );
 
   useEffect(() => {
     setShowRecipe(false);
   }, [currentIndex, committedPantry?.lastScanAt]);
+
+  useEffect(() => {
+    return () => {
+      filePreviews.forEach((preview) => URL.revokeObjectURL(preview.url));
+    };
+  }, [filePreviews]);
 
   useEffect(() => {
     if (showRecipe) {
@@ -244,8 +264,118 @@ export default function Home() {
     }
   }, [showRecipe]);
 
+  useEffect(() => {
+    return () => {
+      releaseCameraStream();
+    };
+  }, []);
+
   function resetPickerInputs() {
-    if (cameraInputRef.current) cameraInputRef.current.value = "";
+    if (galleryInputRef.current) galleryInputRef.current.value = "";
+  }
+
+  function releaseCameraStream() {
+    const stream = streamRef.current;
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+  }
+
+  function stopCamera() {
+    releaseCameraStream();
+    setCameraOpen(false);
+    setCameraBusy(false);
+  }
+
+  async function handleOpenCamera() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError("Dit device giver ikke direkte kamera-adgang her. Brug galleriet som fallback.");
+      return;
+    }
+
+    try {
+      setCameraBusy(true);
+      setCameraError(null);
+      stopCamera();
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          facingMode: { ideal: "environment" },
+        },
+      });
+
+      streamRef.current = stream;
+      setCameraOpen(true);
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play().catch(() => undefined);
+      }
+    } catch {
+      setCameraError("Jeg kunne ikke åbne kameraet. Tjek kamera-tilladelsen, eller brug galleriet.");
+      stopCamera();
+    } finally {
+      setCameraBusy(false);
+    }
+  }
+
+  async function handleCapturePhoto() {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth || !video.videoHeight) {
+      setCameraError("Kameraet er ikke helt klar endnu. Prøv igen om et øjeblik.");
+      return;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+      setCameraError("Jeg kunne ikke tage billedet rent teknisk. Prøv igen.");
+      return;
+    }
+
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, "image/jpeg", 0.92);
+    });
+
+    if (!blob) {
+      setCameraError("Billedet blev ikke gemt ordentligt. Prøv igen.");
+      return;
+    }
+
+    const stamp = Date.now();
+    const capturedFile = new File([blob], `fridgemap-${stamp}.jpg`, {
+      type: "image/jpeg",
+      lastModified: stamp,
+    });
+
+    let nextCount = 0;
+    setFiles((current) => {
+      const merged = mergeSelectedFiles(current, [capturedFile]);
+      nextCount = merged.length;
+      return merged;
+    });
+
+    setCameraError(null);
+    setStatus("Billede tilføjet. Tag gerne et mere fra en anden vinkel.");
+
+    if (nextCount >= MAX_FRAMES) {
+      stopCamera();
+    }
+  }
+
+  function handleRemovePhoto(indexToRemove: number) {
+    setFiles((current) => current.filter((_, index) => index !== indexToRemove));
   }
 
   function replaceDraftItems(nextItems: PantryItem[]) {
@@ -258,6 +388,7 @@ export default function Home() {
 
     const merged = mergeSelectedFiles(files, nextFiles);
     setFiles(merged);
+    setCameraError(null);
     resetPickerInputs();
 
     if (merged.length < files.length + nextFiles.length) {
@@ -271,6 +402,7 @@ export default function Home() {
   }
 
   function resetAll() {
+    stopCamera();
     setFiles([]);
     setDraftItems([]);
     setCommittedPantry(null);
@@ -291,6 +423,7 @@ export default function Home() {
     }
 
     try {
+      stopCamera();
       setLoading(true);
       setStatus("Jeg kigger lige i køleskabet.");
 
@@ -486,20 +619,91 @@ export default function Home() {
           </div>
 
           <div className="scan-controls">
-            <label className="file-picker">
-              <span>Brug kameraet på telefonen</span>
+            <div className="file-picker camera-picker">
+              <div className="camera-copy">
+                <span>Brug kameraet på telefonen</span>
               <p className="camera-hint">
-                Tag 2-4 billeder af hylderne. Tryk igen for hvert nyt billede.
+                Åbn kameraet direkte her, tag 2-4 billeder af hylderne, og brug kun galleriet
+                hvis du allerede har taget dem.
               </p>
-              <input
-                ref={cameraInputRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                disabled={!canAddMorePhotos || loading}
-                onChange={(event) => handlePickedFiles(Array.from(event.target.files || []))}
-              />
-            </label>
+              </div>
+              {cameraOpen ? (
+                <div className="camera-live">
+                  <video
+                    ref={videoRef}
+                    className="camera-preview"
+                    autoPlay
+                    muted
+                    playsInline
+                  />
+
+                  <div className="camera-actions">
+                    <button
+                      type="button"
+                      className="cta-button"
+                      onClick={handleCapturePhoto}
+                      disabled={cameraBusy || loading || !canAddMorePhotos}
+                    >
+                      Tag billede
+                    </button>
+                    <button
+                      type="button"
+                      className="quiet-button"
+                      onClick={stopCamera}
+                      disabled={cameraBusy}
+                    >
+                      Luk kamera
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="camera-actions">
+                  <button
+                    type="button"
+                    className="cta-button"
+                    onClick={handleOpenCamera}
+                    disabled={cameraBusy || loading || !canAddMorePhotos}
+                  >
+                    {cameraBusy ? "Åbner kamera" : cameraButtonLabel}
+                  </button>
+
+                  <label className="quiet-button picker-fallback">
+                    <span>Vælg fra galleri</span>
+                    <input
+                      ref={galleryInputRef}
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      disabled={cameraBusy || loading || !canAddMorePhotos}
+                      onChange={(event) => handlePickedFiles(Array.from(event.target.files || []))}
+                    />
+                  </label>
+                </div>
+              )}
+
+              {cameraError ? <p className="camera-error">{cameraError}</p> : null}
+
+              {filePreviews.length > 0 ? (
+                <div className="capture-strip" aria-label="Valgte billeder">
+                  {filePreviews.map((preview, index) => (
+                    <article className="capture-card" key={preview.id}>
+                      <img
+                        src={preview.url}
+                        alt={`Køleskabsbillede ${index + 1}`}
+                        className="capture-thumb"
+                      />
+                      <button
+                        type="button"
+                        className="capture-remove"
+                        onClick={() => handleRemovePhoto(index)}
+                      >
+                        Fjern
+                      </button>
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+            </div>
 
             <button type="button" className="cta-button" onClick={handleScan} disabled={loading}>
               {loading ? "Et øjeblik" : "Find det i køleskabet"}
