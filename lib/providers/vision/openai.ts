@@ -16,6 +16,7 @@ import type {
   ScanAnalysisResponse,
   VisionProvider,
 } from "../../../types/contracts";
+import { getOpenAIKey } from "./openaiConfig";
 
 /* ---------------- OpenAI-implementering ----------------------------- */
 
@@ -23,7 +24,7 @@ const MAX_IMAGES = 4;
 
 export class OpenAIVisionProvider implements VisionProvider {
   async analyze(req: ScanAnalysisRequest): Promise<ScanAnalysisResponse> {
-    const apiKey = process.env.OPENAI_API_KEY;
+    const apiKey = getOpenAIKey();
     if (!apiKey) throw new Error("OPENAI_API_KEY mangler");
 
     const system = [
