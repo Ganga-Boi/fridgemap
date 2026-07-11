@@ -17,6 +17,7 @@ import type { Answer, Pantry, PantryItem, ScanAnalysisResponse } from "../types/
 
 const API_URL = "/api/analyze";
 const LOW_CONFIDENCE_CUTOFF = 0.68;
+const MAX_FRAMES = 4;
 const APPROVED_RECIPES = allApprovedRecipes();
 const HOUSEHOLD_PROFILE = FIXTURE_HOUSEHOLD;
 const CANDIDATE_RECIPES = filterCandidates(APPROVED_RECIPES, HOUSEHOLD_PROFILE);
@@ -51,7 +52,7 @@ function findIngredientId(value: string) {
 
 function filesToDataUrls(files: File[]) {
   return Promise.all(
-    files.slice(0, 4).map(
+    files.slice(0, MAX_FRAMES).map(
       (file) =>
         new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
@@ -132,10 +133,37 @@ function pickSurpriseIndex(deck: RankedRecipe[]) {
   return deck.length > 0 ? deck.length - 1 : 0;
 }
 
+function mergeSelectedFiles(current: File[], incoming: File[]) {
+  const merged = [...current];
+
+  for (const file of incoming) {
+    const alreadyAdded = merged.some(
+      (existing) =>
+        existing.name === file.name &&
+        existing.size === file.size &&
+        existing.lastModified === file.lastModified
+    );
+
+    if (!alreadyAdded) merged.push(file);
+    if (merged.length >= MAX_FRAMES) break;
+  }
+
+  return merged.slice(0, MAX_FRAMES);
+}
+
 function fileSummary(files: File[]) {
-  if (files.length === 0) return "Ingen billeder valgt endnu.";
-  if (files.length === 1) return files[0].name;
-  return `${files.length} billeder klar.`;
+  switch (files.length) {
+    case 0:
+      return "Ingen billeder endnu. Brug kameraet på telefonen og tag første billede.";
+    case 1:
+      return "1 billede klar. Tag gerne 1-3 mere fra andre vinkler.";
+    case 2:
+      return "2 billeder klar. Det er et godt startpunkt - tag 1-2 mere hvis noget ligger skjult.";
+    case 3:
+      return "3 billeder klar. Du kan tage ét mere, hvis der er en hylde jeg ikke ser endnu.";
+    default:
+      return "4 billeder klar. Jeg har nok til at kigge i køleskabet.";
+  }
 }
 
 function quantityLabel(quantity: PantryItem["quantity"]) {
@@ -165,7 +193,7 @@ function errorMessage(error: string | undefined) {
 }
 
 export default function Home() {
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const recipeRef = useRef<HTMLElement | null>(null);
 
   const [files, setFiles] = useState<File[]>([]);
@@ -216,9 +244,30 @@ export default function Home() {
     }
   }, [showRecipe]);
 
+  function resetPickerInputs() {
+    if (cameraInputRef.current) cameraInputRef.current.value = "";
+  }
+
   function replaceDraftItems(nextItems: PantryItem[]) {
     setDraftItems(sortDraftItems(nextItems));
     if (committedPantry) setIngredientsDirty(true);
+  }
+
+  function handlePickedFiles(nextFiles: File[]) {
+    if (!nextFiles.length) return;
+
+    const merged = mergeSelectedFiles(files, nextFiles);
+    setFiles(merged);
+    resetPickerInputs();
+
+    if (merged.length < files.length + nextFiles.length) {
+      setStatus("Jeg holder mig til de første 4 billeder, så scanningen forbliver skarp.");
+      return;
+    }
+
+    if (status === "VÃ¦lg mindst Ã©t billede fÃ¸rst.") {
+      setStatus(null);
+    }
   }
 
   function resetAll() {
@@ -232,7 +281,7 @@ export default function Home() {
     setIngredientsDirty(false);
     setShowRecipe(false);
     setSuggestionState(createInitialSuggestionState());
-    if (fileInputRef.current) fileInputRef.current.value = "";
+    resetPickerInputs();
   }
 
   async function handleScan() {
@@ -407,6 +456,9 @@ export default function Home() {
     setStatus(statusLine(answer));
   }
 
+  const canAddMorePhotos = files.length < MAX_FRAMES;
+  const cameraButtonLabel = files.length === 0 ? "Åbn kameraet" : "Tag et billede mere";
+
   return (
     <main className="page-shell">
       <div className="page-header">
@@ -435,13 +487,17 @@ export default function Home() {
 
           <div className="scan-controls">
             <label className="file-picker">
-              <span>Vælg billeder</span>
+              <span>Brug kameraet på telefonen</span>
+              <p className="camera-hint">
+                Tag 2-4 billeder af hylderne. Tryk igen for hvert nyt billede.
+              </p>
               <input
-                ref={fileInputRef}
+                ref={cameraInputRef}
                 type="file"
                 accept="image/*"
-                multiple
-                onChange={(event) => setFiles(Array.from(event.target.files || []))}
+                capture="environment"
+                disabled={!canAddMorePhotos || loading}
+                onChange={(event) => handlePickedFiles(Array.from(event.target.files || []))}
               />
             </label>
 

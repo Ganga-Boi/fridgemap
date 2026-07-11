@@ -222,6 +222,17 @@ button {
   color: var(--muted);
 }
 
+.camera-hint {
+  margin: 0 0 4px;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.file-picker input[type="file"] {
+  max-width: 100%;
+}
+
 .helper-text,
 .ingredient-copy span,
 .empty-copy,
