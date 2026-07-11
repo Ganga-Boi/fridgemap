@@ -1,8 +1,8 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "Aftensmad",
-  description: "Kom hjem. Aftensmaden er besluttet.",
+  title: "FridgeMap",
+  description: "Tag et billede af køleskabet og få forslag til retter og manglende ingredienser.",
   manifest: "/manifest.json",
 };
 
