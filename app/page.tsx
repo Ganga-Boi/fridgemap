@@ -32,16 +32,20 @@ const APPROVED_RECIPES = allApprovedRecipes();
 const HOUSEHOLD_PROFILE = FIXTURE_HOUSEHOLD;
 const CANDIDATE_RECIPES = filterCandidates(APPROVED_RECIPES, HOUSEHOLD_PROFILE);
 const INGREDIENT_REGISTRY = buildIngredientRegistry();
-const HIDDEN_FILE_INPUT_STYLE: CSSProperties = {
-  position: "absolute",
-  width: 1,
-  height: 1,
-  padding: 0,
-  margin: -1,
+const FILE_TRIGGER_LABEL_STYLE: CSSProperties = {
+  position: "relative",
   overflow: "hidden",
-  clip: "rect(0, 0, 0, 0)",
-  whiteSpace: "nowrap",
-  border: 0,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+};
+const FILE_TRIGGER_INPUT_STYLE: CSSProperties = {
+  position: "absolute",
+  inset: 0,
+  width: "100%",
+  height: "100%",
+  opacity: 0,
+  cursor: "pointer",
 };
 
 type ScanRouteResponse = {
@@ -213,7 +217,7 @@ function errorMessage(error: string | undefined) {
   }
 }
 
-function shouldPreferNativeCamera() {
+function isTouchLikeDevice() {
   if (typeof window === "undefined" || typeof navigator === "undefined") {
     return false;
   }
@@ -284,8 +288,8 @@ export default function Home() {
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraBusy, setCameraBusy] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
-  const [preferNativeCamera, setPreferNativeCamera] = useState(false);
   const [canUseLiveCamera, setCanUseLiveCamera] = useState(false);
+  const [touchLikeDevice, setTouchLikeDevice] = useState(false);
   const [showRecipe, setShowRecipe] = useState(false);
   const [suggestionState, setSuggestionState] = useState(createInitialSuggestionState());
 
@@ -343,9 +347,7 @@ export default function Home() {
 
   useEffect(() => {
     setCanUseLiveCamera(Boolean(navigator.mediaDevices?.getUserMedia));
-    if (shouldPreferNativeCamera()) {
-      setPreferNativeCamera(true);
-    }
+    setTouchLikeDevice(isTouchLikeDevice());
   }, []);
 
   useEffect(() => {
@@ -375,23 +377,16 @@ export default function Home() {
     releaseCameraStream();
     setCameraOpen(false);
     setCameraBusy(false);
-
-    if (shouldPreferNativeCamera()) {
-      setPreferNativeCamera(true);
-    }
   }
 
-  function openNativeCameraFallback(message: string) {
-    releaseCameraStream();
-    setCameraOpen(false);
-    setCameraBusy(false);
-    setPreferNativeCamera(true);
+  function showLiveCameraError(message: string) {
+    stopCamera();
     setCameraError(message);
   }
 
   async function handleOpenCamera() {
     if (!navigator.mediaDevices?.getUserMedia) {
-      openNativeCameraFallback("Live preview virker ikke her. Brug telefonens kamera i stedet.");
+      showLiveCameraError("Live kamera virker ikke her. Brug knappen til at tage et billede i stedet.");
       return;
     }
 
@@ -416,7 +411,7 @@ export default function Home() {
 
       const video = videoRef.current;
       if (!video) {
-        openNativeCameraFallback("Kamera-previewet blev ikke klar. Brug telefonens kamera i stedet.");
+        showLiveCameraError("Kamera-previewet blev ikke klar. Brug knappen til at tage et billede i stedet.");
         return;
       }
 
@@ -425,10 +420,10 @@ export default function Home() {
 
       const previewReady = await waitForVideoReady(video);
       if (!previewReady) {
-        openNativeCameraFallback("Kamera-previewet blev ikke klar. Brug telefonens kamera i stedet.");
+        showLiveCameraError("Kamera-previewet blev ikke klar. Brug knappen til at tage et billede i stedet.");
       }
     } catch {
-      openNativeCameraFallback("Jeg kunne ikke Ã¥bne kamera-previewet. Brug telefonens kamera i stedet.");
+      showLiveCameraError("Jeg kunne ikke Ã¥bne live kamera. Brug knappen til at tage et billede i stedet.");
     } finally {
       setCameraBusy(false);
     }
@@ -437,7 +432,7 @@ export default function Home() {
   async function handleCapturePhoto() {
     const video = videoRef.current;
     if (!video || !video.videoWidth || !video.videoHeight) {
-      openNativeCameraFallback("Kamera-previewet blev ikke klar. Brug telefonens kamera i stedet.");
+      showLiveCameraError("Kamera-previewet blev ikke klart nok. Brug knappen til at tage et billede i stedet.");
       return;
     }
 
@@ -508,9 +503,7 @@ export default function Home() {
       return;
     }
 
-    if (status === "Tag mindst Ã©t billede fÃ¸rst.") {
-      setStatus(null);
-    }
+    setStatus("Billede tilfÃ¸jet. Tag gerne et mere fra en anden vinkel.");
   }
 
   function resetAll() {
@@ -595,11 +588,14 @@ export default function Home() {
     const duplicate = draftItems.some((item) =>
       ingredientId
         ? item.ingredientId === ingredientId
-        : !item.ingredientId && normalizeIngredientLookup(item.rawLabel) === normalizeIngredientLookup(rawLabel)
+        : !item.ingredientId &&
+          normalizeIngredientLookup(item.rawLabel) === normalizeIngredientLookup(rawLabel)
     );
 
     if (duplicate) {
-      setStatus(`${ingredientId ? displayIngredient(ingredientId) : rawLabel} stÃ¥r allerede pÃ¥ listen.`);
+      setStatus(
+        `${ingredientId ? displayIngredient(ingredientId) : rawLabel} stÃ¥r allerede pÃ¥ listen.`
+      );
       setManualInput("");
       return;
     }
@@ -614,10 +610,7 @@ export default function Home() {
       seenAt,
     };
 
-    replaceDraftItems([
-      ...draftItems,
-      nextItem,
-    ]);
+    replaceDraftItems([...draftItems, nextItem]);
     setLastScanAt(seenAt);
     setManualInput("");
     setStatus(`${displayPantryItem(nextItem)} er lagt til.`);
@@ -642,7 +635,9 @@ export default function Home() {
     setShowRecipe(false);
 
     if (!deck.length) {
-      setStatus("Jeg kan ikke finde en god hverdagsret ud fra det her endnu. TilfÃ¸j gerne noget mere bÃ¦rende.");
+      setStatus(
+        "Jeg kan ikke finde en god hverdagsret ud fra det her endnu. TilfÃ¸j gerne noget mere bÃ¦rende."
+      );
       return;
     }
 
@@ -703,13 +698,7 @@ export default function Home() {
   }
 
   const canAddMorePhotos = files.length < MAX_FRAMES;
-  const cameraButtonLabel = preferNativeCamera
-    ? files.length === 0
-      ? "Tag billede"
-      : "Tag et billede mere"
-    : files.length === 0
-      ? "Ã…bn kameraet"
-      : "Tag et billede mere";
+  const showDirectNativeInput = touchLikeDevice;
 
   return (
     <main className="page-shell">
@@ -745,6 +734,7 @@ export default function Home() {
                 <span>Brug kameraet pÃ¥ telefonen</span>
                 <p className="camera-hint">{CAMERA_HELP}</p>
               </div>
+
               {cameraOpen ? (
                 <div className="camera-live">
                   <video
@@ -774,75 +764,83 @@ export default function Home() {
                     </button>
                   </div>
                 </div>
-              ) : (
+              ) : showDirectNativeInput ? (
                 <div className="camera-actions">
-                  {preferNativeCamera ? (
-                    <label className="cta-button picker-fallback">
-                      <span>{cameraButtonLabel}</span>
-                      <input
-                        ref={nativeCameraInputRef}
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        style={HIDDEN_FILE_INPUT_STYLE}
-                        disabled={cameraBusy || loading || !canAddMorePhotos}
-                        onChange={(event) => handlePickedFiles(Array.from(event.target.files || []))}
-                      />
-                    </label>
-                  ) : (
+                  <input
+                    ref={nativeCameraInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    disabled={cameraBusy || loading || !canAddMorePhotos}
+                    onChange={(event) => handlePickedFiles(Array.from(event.target.files || []))}
+                  />
+
+                  {canUseLiveCamera ? (
                     <button
                       type="button"
-                      className="cta-button"
+                      className="quiet-button"
                       onClick={handleOpenCamera}
                       disabled={cameraBusy || loading || !canAddMorePhotos}
                     >
-                      {cameraBusy ? "Ã…bner kamera" : cameraButtonLabel}
+                      {cameraBusy ? "Åbner kamera" : "Prøv live kamera"}
                     </button>
-                  )}
+                  ) : null}
 
-                  {preferNativeCamera ? (
-                    canUseLiveCamera ? (
-                      <button
-                        type="button"
-                        className="quiet-button"
-                        onClick={() => {
-                          setPreferNativeCamera(false);
-                          void handleOpenCamera();
-                        }}
-                        disabled={cameraBusy || loading || !canAddMorePhotos}
-                      >
-                        PrÃ¸v live kamera
-                      </button>
-                    ) : null
-                  ) : (
-                    <label className="quiet-button picker-fallback">
-                      <span>Brug telefonens kamera</span>
-                      <input
-                        ref={nativeCameraInputRef}
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        style={HIDDEN_FILE_INPUT_STYLE}
-                        disabled={cameraBusy || loading || !canAddMorePhotos}
-                        onChange={(event) => handlePickedFiles(Array.from(event.target.files || []))}
-                      />
-                    </label>
-                  )}
+                  <input
+                    ref={galleryInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    disabled={cameraBusy || loading || !canAddMorePhotos}
+                    onChange={(event) => handlePickedFiles(Array.from(event.target.files || []))}
+                  />
+                </div>
+              ) : (
+                <div className="camera-actions">
+                  <label
+                    className="cta-button picker-fallback"
+                    style={FILE_TRIGGER_LABEL_STYLE}
+                  >
+                    <span>Brug telefonens kamera</span>
+                    <input
+                      ref={nativeCameraInputRef}
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      style={FILE_TRIGGER_INPUT_STYLE}
+                      disabled={cameraBusy || loading || !canAddMorePhotos}
+                      onChange={(event) => handlePickedFiles(Array.from(event.target.files || []))}
+                    />
+                  </label>
 
-                  <label className="quiet-button picker-fallback">
+                  {canUseLiveCamera ? (
+                    <button
+                      type="button"
+                      className="quiet-button"
+                      onClick={handleOpenCamera}
+                      disabled={cameraBusy || loading || !canAddMorePhotos}
+                    >
+                      {cameraBusy ? "Åbner kamera" : "Prøv live kamera"}
+                    </button>
+                  ) : null}
+
+                  <label
+                    className="quiet-button picker-fallback"
+                    style={FILE_TRIGGER_LABEL_STYLE}
+                  >
                     <span>{BUTTONS.useGallery}</span>
                     <input
                       ref={galleryInputRef}
                       type="file"
                       accept="image/*"
                       multiple
+                      style={FILE_TRIGGER_INPUT_STYLE}
                       disabled={cameraBusy || loading || !canAddMorePhotos}
                       onChange={(event) => handlePickedFiles(Array.from(event.target.files || []))}
                     />
                   </label>
                 </div>
               )}
-
               {cameraError ? <p className="camera-error">{cameraError}</p> : null}
 
               {filePreviews.length > 0 ? (
@@ -909,7 +907,10 @@ export default function Home() {
                       <p className="list-label">Ser rigtigt ud</p>
                       <div className="ingredient-list">
                         {groupedItems.certain.map(({ item, index }) => (
-                          <article className="ingredient-card" key={`${item.ingredientId ?? item.rawLabel}-${index}`}>
+                          <article
+                            className="ingredient-card"
+                            key={`${item.ingredientId ?? item.rawLabel}-${index}`}
+                          >
                             <div className="ingredient-copy">
                               <strong>{displayPantryItem(item)}</strong>
                               <span>{pantrySourceLabel(item)}</span>
@@ -948,7 +949,10 @@ export default function Home() {
                       <p className="list-label">Tjek lige de her</p>
                       <div className="ingredient-list">
                         {groupedItems.doubleCheck.map(({ item, index }) => (
-                          <article className="ingredient-card warning-card" key={`${item.ingredientId ?? item.rawLabel}-${index}`}>
+                          <article
+                            className="ingredient-card warning-card"
+                            key={`${item.ingredientId ?? item.rawLabel}-${index}`}
+                          >
                             <div className="ingredient-copy">
                               <strong>{displayPantryItem(item)}</strong>
                               <span>jeg er ikke helt sikker pÃ¥ den</span>
@@ -1026,10 +1030,19 @@ export default function Home() {
                   <h3>Vi er ved kanten af listen</h3>
                   <p>{OUT_OF_IDEAS}</p>
                   <div className="out-of-ideas-actions">
-                    <button type="button" className="cta-button" onClick={handleScan} disabled={loading || files.length === 0}>
+                    <button
+                      type="button"
+                      className="cta-button"
+                      onClick={handleScan}
+                      disabled={loading || files.length === 0}
+                    >
                       Kig igen
                     </button>
-                    <button type="button" className="quiet-button" onClick={handleResetSuggestions}>
+                    <button
+                      type="button"
+                      className="quiet-button"
+                      onClick={handleResetSuggestions}
+                    >
                       {BUTTONS.tryAgain}
                     </button>
                   </div>
