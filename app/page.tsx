@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { flushSync } from "react-dom";
 import AnswerCard from "../components/AnswerCard";
 import {
   BUTTONS,
@@ -287,6 +286,7 @@ export default function Home() {
   const [ingredientsDirty, setIngredientsDirty] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraBusy, setCameraBusy] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [canUseLiveCamera, setCanUseLiveCamera] = useState(false);
   const [touchLikeDevice, setTouchLikeDevice] = useState(false);
@@ -361,6 +361,10 @@ export default function Home() {
     if (nativeCameraInputRef.current) nativeCameraInputRef.current.value = "";
   }
 
+  function openNativeCamera() {
+    nativeCameraInputRef.current?.click();
+  }
+
   function releaseCameraStream() {
     const stream = streamRef.current;
     if (stream) {
@@ -377,6 +381,7 @@ export default function Home() {
     releaseCameraStream();
     setCameraOpen(false);
     setCameraBusy(false);
+    setCameraReady(false);
   }
 
   function showLiveCameraError(message: string) {
@@ -385,13 +390,22 @@ export default function Home() {
   }
 
   async function handleOpenCamera() {
+    const shouldUseNativeCamera = touchLikeDevice || isTouchLikeDevice();
+    if (shouldUseNativeCamera) {
+      setTouchLikeDevice(true);
+      setCameraError(null);
+      openNativeCamera();
+      return;
+    }
+
     if (!navigator.mediaDevices?.getUserMedia) {
-      showLiveCameraError("Live kamera virker ikke her. Brug knappen til at tage et billede i stedet.");
+      showLiveCameraError("Live kamera virker ikke her. Brug telefonens kamera i stedet.");
       return;
     }
 
     try {
       setCameraBusy(true);
+      setCameraReady(false);
       setCameraError(null);
       releaseCameraStream();
       setCameraOpen(false);
@@ -405,13 +419,14 @@ export default function Home() {
 
       streamRef.current = stream;
 
-      flushSync(() => {
-        setCameraOpen(true);
+      setCameraOpen(true);
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => resolve());
       });
 
       const video = videoRef.current;
       if (!video) {
-        showLiveCameraError("Kamera-previewet blev ikke klar. Brug knappen til at tage et billede i stedet.");
+        showLiveCameraError("Kamera-previewet blev ikke klar. Brug telefonens kamera i stedet.");
         return;
       }
 
@@ -420,8 +435,10 @@ export default function Home() {
 
       const previewReady = await waitForVideoReady(video);
       if (!previewReady) {
-        showLiveCameraError("Kamera-previewet blev ikke klar. Brug knappen til at tage et billede i stedet.");
+        showLiveCameraError("Live-kameraet blev ikke klar. Brug telefonens kamera i stedet.");
+        return;
       }
+      setCameraReady(true);
     } catch {
       showLiveCameraError("Jeg kunne ikke Ã¥bne live kamera. Brug knappen til at tage et billede i stedet.");
     } finally {
@@ -431,8 +448,8 @@ export default function Home() {
 
   async function handleCapturePhoto() {
     const video = videoRef.current;
-    if (!video || !video.videoWidth || !video.videoHeight) {
-      showLiveCameraError("Kamera-previewet blev ikke klart nok. Brug knappen til at tage et billede i stedet.");
+    if (!cameraReady || !video || !video.videoWidth || !video.videoHeight) {
+      showLiveCameraError("Live-kameraet blev ikke klar. Brug telefonens kamera i stedet.");
       return;
     }
 
@@ -495,6 +512,7 @@ export default function Home() {
 
     const merged = mergeSelectedFiles(files, nextFiles);
     setFiles(merged);
+    stopCamera();
     setCameraError(null);
     resetPickerInputs();
 
@@ -750,9 +768,9 @@ export default function Home() {
                       type="button"
                       className="cta-button"
                       onClick={handleCapturePhoto}
-                      disabled={cameraBusy || loading || !canAddMorePhotos}
+                      disabled={cameraBusy || loading || !canAddMorePhotos || !cameraReady}
                     >
-                      Tag billede
+                      {cameraReady ? "Tag billede" : "Klargør kamera..."}
                     </button>
                     <button
                       type="button"
