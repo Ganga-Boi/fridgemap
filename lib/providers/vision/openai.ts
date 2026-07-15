@@ -17,7 +17,7 @@ import type {
   VisionProvider,
 } from "../../../types/contracts";
 import { parseAndValidateVisionResponse } from "./scanContract";
-import { getOpenAIKey } from "./openaiConfig";
+import { getOpenAIKey, getOpenAIVisionModel } from "./openaiConfig";
 
 /* ---------------- OpenAI-implementering ----------------------------- */
 
@@ -45,7 +45,7 @@ export class OpenAIVisionProvider implements VisionProvider {
     ].join("\n");
 
     const payload = {
-      model: process.env.OPENAI_VISION_MODEL ?? "gpt-5.6",
+      model: getOpenAIVisionModel(),
       input: [
         { role: "system", content: [{ type: "input_text", text: system }] },
         {

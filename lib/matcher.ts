@@ -14,6 +14,9 @@
  *  - Konfidens vises aldrig — den oversættes til copyKey.
  */
 
+import {
+  ACCEPTED_CONFIDENCE_CUTOFF,
+} from "../types/contracts";
 import type {
   Answer,
   AnswerCopyKey,
@@ -29,7 +32,7 @@ import type {
 
 const MAX_MISSING_CORE = 1;        // "mangler kun én ting" — aldrig to
 const REPEAT_PENALTY_DAYS = 6;     // straf retter lavet inden for X dage
-const LOW_CONFIDENCE = 0.5;        // under dette → copyKey "tjek_lige"
+// P4: tærsklen bor i contracts (ACCEPTED_CONFIDENCE_CUTOFF) — én kilde.
 const CONFIDENCE_DECAY_PER_DAY = 0.08; // lagertillid falder pr. dag siden scan
 
 /* ---------------- Hjælpere ----------------------------------------- */
@@ -163,7 +166,7 @@ export function buildAnswer(recipe: Recipe, pantry: Pantry, nowIso: string): Ans
     const item = idx.get(i.ingredientId);
     if (!item) return false;
     const eff = effectiveConfidence(item, nowIso);
-    return eff > 0.15 && eff < LOW_CONFIDENCE;
+    return eff > 0.15 && eff < ACCEPTED_CONFIDENCE_CUTOFF;
   });
 
   let copyKey: AnswerCopyKey;

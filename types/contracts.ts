@@ -35,6 +35,13 @@ export type Supermarket =
 
 export type QuantityEstimate = "rigeligt" | "noget" | "lidt";
 
+/**
+ * P4: DEN fælles konfidenstærskel. Én kilde — UI-gruppering, matcher og
+ * scan-status skal alle bruge denne. En vare under tærsklen er "tentative"
+ * og må ALDRIG tælle som sikker dækning af en bærende ingrediens.
+ */
+export const ACCEPTED_CONFIDENCE_CUTOFF = 0.68;
+
 export interface PantryItem {
   rawLabel: string;               // det modellen eller brugeren faktisk kaldte varen
   ingredientId: string | null;    // kanonisk registry-id, hvis vi kan mappe sikkert

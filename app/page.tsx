@@ -4,12 +4,20 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import AnswerCard from "../components/AnswerCard";
 import {
   BUTTONS,
+  CAMERA_FALLBACK,
   CAMERA_HELP,
   EMPTY_PANTRY,
   LOADING_HEADLINE,
   ONBOARDING_LEAD,
   OUT_OF_IDEAS,
+  REVIEW_OPTIONAL_HEADING,
+  REVIEW_OPTIONAL_SUB,
+  SCAN_STATUS,
   SCAN_TIPS,
+  addedToList,
+  alreadyOnList,
+  fileSummary,
+  scanErrorMessage,
   statusLine,
 } from "../lib/copy";
 import {
@@ -18,17 +26,23 @@ import {
   createInitialSuggestionState,
   rejectCurrentSuggestion,
 } from "../lib/homeState";
-import { FIXTURE_HOUSEHOLD } from "../lib/fixtures";
+import { DEFAULT_HOUSEHOLD } from "../lib/household";
 import { buildIngredientRegistry, normalizeIngredientLookup } from "../lib/ingredientRegistry";
 import { buildAnswer, filterCandidates, rankFallback, type RankedRecipe } from "../lib/matcher";
 import { allApprovedRecipes } from "../lib/recipes/recipeEngine";
-import type { Pantry, PantryItem, ScanAnalysisResponse } from "../types/contracts";
+import {
+  ACCEPTED_CONFIDENCE_CUTOFF,
+  type Pantry,
+  type PantryItem,
+  type ScanAnalysisResponse,
+} from "../types/contracts";
 
 const API_URL = "/api/analyze";
-const LOW_CONFIDENCE_CUTOFF = 0.68;
 const MAX_FRAMES = 4;
+const MAX_IMAGE_DIMENSION = 1280; // P1: klientkomprimering (Vercel-grænse ~4,5 MB)
+const JPEG_QUALITY = 0.72;
 const APPROVED_RECIPES = allApprovedRecipes();
-const HOUSEHOLD_PROFILE = FIXTURE_HOUSEHOLD;
+const HOUSEHOLD_PROFILE = DEFAULT_HOUSEHOLD;
 const CANDIDATE_RECIPES = filterCandidates(APPROVED_RECIPES, HOUSEHOLD_PROFILE);
 const INGREDIENT_REGISTRY = buildIngredientRegistry();
 const FILE_TRIGGER_LABEL_STYLE: CSSProperties = {
@@ -74,18 +88,47 @@ function findIngredientId(value: string) {
   return INGREDIENT_REGISTRY.findIngredientId(value);
 }
 
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+/** P1: Nedskalér og komprimér på klienten, så 4 mobilfotos aldrig
+ *  rammer Vercels payload-grænse. Falder tilbage til rå dataURL,
+ *  hvis dekodning fejler — et scan må aldrig strande på komprimering. */
+async function fileToCompressedDataUrl(file: File): Promise<string> {
+  const rawDataUrl = await readFileAsDataUrl(file);
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error("IMAGE_DECODE_FAILED"));
+      el.src = rawDataUrl;
+    });
+
+    const longest = Math.max(image.naturalWidth, image.naturalHeight);
+    const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(1, longest));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+
+    const context = canvas.getContext("2d");
+    if (!context) return rawDataUrl;
+
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", JPEG_QUALITY);
+  } catch {
+    return rawDataUrl;
+  }
+}
+
 function filesToDataUrls(files: File[]) {
-  return Promise.all(
-    files.slice(0, MAX_FRAMES).map(
-      (file) =>
-        new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(String(reader.result));
-          reader.onerror = () => reject(reader.error);
-          reader.readAsDataURL(file);
-        })
-    )
-  );
+  return Promise.all(files.slice(0, MAX_FRAMES).map(fileToCompressedDataUrl));
 }
 
 async function postJSON(body: unknown) {
@@ -175,20 +218,6 @@ function mergeSelectedFiles(current: File[], incoming: File[]) {
   return merged.slice(0, MAX_FRAMES);
 }
 
-function fileSummary(files: File[]) {
-  switch (files.length) {
-    case 0:
-      return "Ingen billeder endnu. Tag fÃ¸rste billede.";
-    case 1:
-      return "1 billede klar. Tag gerne 1-3 mere fra andre vinkler.";
-    case 2:
-      return "2 billeder klar. Det er et godt startpunkt.";
-    case 3:
-      return "3 billeder klar. Du kan tage Ã©t mere.";
-    default:
-      return "4 billeder klar. Jeg har nok.";
-  }
-}
 
 function quantityLabel(quantity: PantryItem["quantity"]) {
   switch (quantity) {
@@ -201,20 +230,6 @@ function quantityLabel(quantity: PantryItem["quantity"]) {
   }
 }
 
-function errorMessage(error: string | undefined) {
-  switch (error) {
-    case "OPENAI_API_KEY_MISSING":
-      return "Jeg mangler stadig nÃ¸glen til billedforstÃ¥elsen i produktion.";
-    case "ANTHROPIC_API_KEY_MISSING":
-      return "Jeg mangler stadig Claude-nÃ¸glen til billedforstÃ¥elsen i produktion.";
-    case "VISION_JSON_PARSE_ERROR":
-      return "Jeg kunne ikke lÃ¦se billederne rent nok denne gang. PrÃ¸v gerne igen med 2-4 tydelige billeder.";
-    case "NO_FRAMES":
-      return "Tag mindst Ã©t billede fÃ¸rst.";
-    default:
-      return "Der gik noget galt. PrÃ¸v gerne igen om et Ã¸jeblik.";
-  }
-}
 
 function isTouchLikeDevice() {
   if (typeof window === "undefined" || typeof navigator === "undefined") {
@@ -283,7 +298,6 @@ export default function Home() {
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [manualInput, setManualInput] = useState("");
-  const [ingredientsDirty, setIngredientsDirty] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraBusy, setCameraBusy] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
@@ -296,8 +310,8 @@ export default function Home() {
   const groupedItems = useMemo(() => {
     const sorted = sortDraftItems(draftItems).map((item, index) => ({ item, index }));
     return {
-      certain: sorted.filter(({ item }) => item.confidence >= LOW_CONFIDENCE_CUTOFF),
-      doubleCheck: sorted.filter(({ item }) => item.confidence < LOW_CONFIDENCE_CUTOFF),
+      certain: sorted.filter(({ item }) => item.confidence >= ACCEPTED_CONFIDENCE_CUTOFF),
+      doubleCheck: sorted.filter(({ item }) => item.confidence < ACCEPTED_CONFIDENCE_CUTOFF),
     };
   }, [draftItems]);
 
@@ -309,15 +323,6 @@ export default function Home() {
   const currentAnswer = currentRanked && committedPantry
     ? buildAnswer(currentRanked.recipe, committedPantry, new Date().toISOString())
     : null;
-  const alternatives = committedPantry
-    ? suggestionDeck
-        .map((entry, index) => ({
-          index,
-          answer: buildAnswer(entry.recipe, committedPantry, new Date().toISOString()),
-        }))
-        .filter(({ index }) => index !== currentIndex)
-        .slice(0, 3)
-    : [];
   const hitLimit = suggestionState.rejections >= MAX_REJECTIONS;
   const filePreviews = useMemo(
     () =>
@@ -384,9 +389,19 @@ export default function Home() {
     setCameraReady(false);
   }
 
-  function showLiveCameraError(message: string) {
+  /** P5: Preview-fejl må aldrig efterlade brugeren uden udgang.
+   *  Mobil: åbn native kamera direkte. Desktop: åbn galleri-vælgeren.
+   *  Beskeden er følgeskab — handlingen er allerede sket. */
+  function fallbackToNativeCapture() {
     stopCamera();
-    setCameraError(message);
+    setCameraError(null);
+    if (touchLikeDevice || isTouchLikeDevice()) {
+      setStatus(CAMERA_FALLBACK.mobile);
+      openNativeCamera();
+      return;
+    }
+    setStatus(CAMERA_FALLBACK.desktop);
+    galleryInputRef.current?.click();
   }
 
   async function handleOpenCamera() {
@@ -399,7 +414,7 @@ export default function Home() {
     }
 
     if (!navigator.mediaDevices?.getUserMedia) {
-      showLiveCameraError("Live kamera virker ikke her. Brug telefonens kamera i stedet.");
+      fallbackToNativeCapture();
       return;
     }
 
@@ -426,7 +441,7 @@ export default function Home() {
 
       const video = videoRef.current;
       if (!video) {
-        showLiveCameraError("Kamera-previewet blev ikke klar. Brug telefonens kamera i stedet.");
+        fallbackToNativeCapture();
         return;
       }
 
@@ -435,12 +450,12 @@ export default function Home() {
 
       const previewReady = await waitForVideoReady(video);
       if (!previewReady) {
-        showLiveCameraError("Live-kameraet blev ikke klar. Brug telefonens kamera i stedet.");
+        fallbackToNativeCapture();
         return;
       }
       setCameraReady(true);
     } catch {
-      showLiveCameraError("Jeg kunne ikke Ã¥bne live kamera. Brug knappen til at tage et billede i stedet.");
+      fallbackToNativeCapture();
     } finally {
       setCameraBusy(false);
     }
@@ -449,28 +464,32 @@ export default function Home() {
   async function handleCapturePhoto() {
     const video = videoRef.current;
     if (!cameraReady || !video || !video.videoWidth || !video.videoHeight) {
-      showLiveCameraError("Live-kameraet blev ikke klar. Brug telefonens kamera i stedet.");
+      fallbackToNativeCapture();
       return;
     }
 
+    const captureScale = Math.min(
+      1,
+      MAX_IMAGE_DIMENSION / Math.max(video.videoWidth, video.videoHeight)
+    );
     const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    canvas.width = Math.max(1, Math.round(video.videoWidth * captureScale));
+    canvas.height = Math.max(1, Math.round(video.videoHeight * captureScale));
 
     const context = canvas.getContext("2d");
     if (!context) {
-      setCameraError("Jeg kunne ikke tage billedet rent teknisk. PrÃ¸v igen.");
+      setCameraError(CAMERA_FALLBACK.captureFailed);
       return;
     }
 
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
     const blob = await new Promise<Blob | null>((resolve) => {
-      canvas.toBlob(resolve, "image/jpeg", 0.92);
+      canvas.toBlob(resolve, "image/jpeg", JPEG_QUALITY);
     });
 
     if (!blob) {
-      setCameraError("Billedet blev ikke gemt ordentligt. PrÃ¸v igen.");
+      setCameraError(CAMERA_FALLBACK.captureFailed);
       return;
     }
 
@@ -488,7 +507,7 @@ export default function Home() {
     });
 
     setCameraError(null);
-    setStatus("Billede tilfÃ¸jet. Tag gerne et mere fra en anden vinkel.");
+    setStatus(SCAN_STATUS.photoAdded);
 
     if (nextCount >= MAX_FRAMES) {
       stopCamera();
@@ -499,9 +518,31 @@ export default function Home() {
     setFiles((current) => current.filter((_, index) => index !== indexToRemove));
   }
 
+  /** P2: Fælles commit — pantry bygges, deck beregnes, svaret sættes.
+   *  Kaldes af scan OG af enhver frivillig rettelse: buddet opdaterer
+   *  sig selv, brugeren skal aldrig trykke "foreslå" (produktloven). */
+  function commitAndSuggest(items: PantryItem[], seenAt: string) {
+    const pantry = createPantry(items, seenAt, committedPantry);
+    const deck = buildSuggestionDeck(pantry, new Date());
+
+    setCommittedPantry(pantry);
+    setSuggestionState(createInitialSuggestionState());
+    setShowRecipe(false);
+
+    if (!deck.length) {
+      setStatus(SCAN_STATUS.noGoodDish);
+      return;
+    }
+
+    setStatus(statusLine(buildAnswer(deck[0].recipe, pantry, new Date().toISOString())));
+  }
+
   function replaceDraftItems(nextItems: PantryItem[]) {
-    setDraftItems(sortDraftItems(nextItems));
-    if (committedPantry) setIngredientsDirty(true);
+    const sorted = sortDraftItems(nextItems);
+    setDraftItems(sorted);
+    if (committedPantry) {
+      commitAndSuggest(sorted, lastScanAt ?? new Date().toISOString());
+    }
   }
 
   function handlePickedFiles(nextFiles: File[]) {
@@ -517,11 +558,11 @@ export default function Home() {
     resetPickerInputs();
 
     if (merged.length < files.length + nextFiles.length) {
-      setStatus("Jeg holder mig til de fÃ¸rste 4 billeder, sÃ¥ scanningen forbliver skarp.");
+      setStatus(SCAN_STATUS.keepingFirstFour);
       return;
     }
 
-    setStatus("Billede tilfÃ¸jet. Tag gerne et mere fra en anden vinkel.");
+    setStatus(SCAN_STATUS.photoAdded);
   }
 
   function resetAll() {
@@ -533,7 +574,6 @@ export default function Home() {
     setStatus(null);
     setLoading(false);
     setManualInput("");
-    setIngredientsDirty(false);
     setCameraError(null);
     setShowRecipe(false);
     setSuggestionState(createInitialSuggestionState());
@@ -542,39 +582,38 @@ export default function Home() {
 
   async function handleScan() {
     if (!files.length) {
-      setStatus("Tag mindst Ã©t billede fÃ¸rst.");
+      setStatus(SCAN_STATUS.needPhotoFirst);
       return;
     }
 
     try {
       stopCamera();
       setLoading(true);
-      setStatus("Jeg kigger lige i kÃ¸leskabet.");
+      setStatus(SCAN_STATUS.looking);
 
       const frames = await filesToDataUrls(files);
       const result = await postJSON({ frames });
 
       if (!result.ok) {
-        setStatus(errorMessage(result.error));
+        setStatus(scanErrorMessage(result.error));
         return;
       }
 
       const seenAt = new Date().toISOString();
       const nextItems = (result.items ?? []).map((item) => makeDraftItem(item, seenAt));
 
-      setDraftItems(sortDraftItems(nextItems));
-      setCommittedPantry(null);
+      const sorted = sortDraftItems(nextItems);
+      setDraftItems(sorted);
       setLastScanAt(seenAt);
-      setIngredientsDirty(false);
-      setShowRecipe(false);
-      setSuggestionState(createInitialSuggestionState());
 
       if (nextItems.length === 0) {
-        setStatus("Jeg fandt ikke nok endnu. TilfÃ¸j gerne et par ting selv.");
+        setCommittedPantry(null);
+        setStatus(SCAN_STATUS.foundNothing);
         return;
       }
 
-      setStatus("Jeg fandt noget. Ret listen, sÃ¥ giver jeg et konkret bud.");
+      // P2 — produktloven: scan → svar direkte. Ingen port.
+      commitAndSuggest(sorted, seenAt);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setStatus(`Fejl: ${message}`);
@@ -598,7 +637,7 @@ export default function Home() {
   function handleManualAdd() {
     const rawLabel = manualInput.trim();
     if (!rawLabel) {
-      setStatus("Skriv en vare fÃ¸rst.");
+      setStatus(SCAN_STATUS.writeItemFirst);
       return;
     }
 
@@ -611,9 +650,7 @@ export default function Home() {
     );
 
     if (duplicate) {
-      setStatus(
-        `${ingredientId ? displayIngredient(ingredientId) : rawLabel} stÃ¥r allerede pÃ¥ listen.`
-      );
+      setStatus(alreadyOnList(ingredientId ? displayIngredient(ingredientId) : rawLabel));
       setManualInput("");
       return;
     }
@@ -631,36 +668,7 @@ export default function Home() {
     replaceDraftItems([...draftItems, nextItem]);
     setLastScanAt(seenAt);
     setManualInput("");
-    setStatus(`${displayPantryItem(nextItem)} er lagt til.`);
-  }
-
-  function handleSuggest() {
-    if (!draftItems.length) {
-      setStatus("TilfÃ¸j mindst Ã©n vare fÃ¸rst.");
-      return;
-    }
-
-    const pantry = createPantry(
-      draftItems,
-      lastScanAt ?? new Date().toISOString(),
-      committedPantry
-    );
-    const deck = buildSuggestionDeck(pantry, new Date());
-
-    setCommittedPantry(pantry);
-    setSuggestionState(createInitialSuggestionState());
-    setIngredientsDirty(false);
-    setShowRecipe(false);
-
-    if (!deck.length) {
-      setStatus(
-        "Jeg kan ikke finde en god hverdagsret ud fra det her endnu. TilfÃ¸j gerne noget mere bÃ¦rende."
-      );
-      return;
-    }
-
-    const firstAnswer = buildAnswer(deck[0].recipe, pantry, new Date().toISOString());
-    setStatus(statusLine(firstAnswer));
+    setStatus(addedToList(displayPantryItem(nextItem)));
   }
 
   function handleSomethingElse() {
@@ -724,7 +732,7 @@ export default function Home() {
         <div className="brand-mark">FM</div>
         <div className="brand-copy">
           <p className="kicker">FridgeMap</p>
-          <h1>Tag billeder af kÃ¸leskabet. FÃ¥ Ã©t godt bud til aftensmad.</h1>
+          <h1>Tag billeder af køleskabet. Få ét godt bud til aftensmad.</h1>
           <p className="lead">{ONBOARDING_LEAD}</p>
         </div>
       </div>
@@ -733,7 +741,7 @@ export default function Home() {
         <section className="scan-panel">
           <div className="panel-heading">
             <div>
-              <p className="panel-label">1. Kig i kÃ¸leskabet</p>
+              <p className="panel-label">Kig i køleskabet</p>
               <h2>Start med 2-4 tydelige billeder</h2>
               <ul className="scan-tips">
                 {SCAN_TIPS.map((tip) => (
@@ -749,7 +757,7 @@ export default function Home() {
           <div className="scan-controls">
             <div className="file-picker camera-picker">
               <div className="camera-copy">
-                <span>Brug kameraet pÃ¥ telefonen</span>
+                <span>Brug kameraet på telefonen</span>
                 <p className="camera-hint">{CAMERA_HELP}</p>
               </div>
 
@@ -867,7 +875,7 @@ export default function Home() {
                     <article className="capture-card" key={preview.id}>
                       <img
                         src={preview.url}
-                        alt={`KÃ¸leskabsbillede ${index + 1}`}
+                        alt={`Køleskabsbillede ${index + 1}`}
                         className="capture-thumb"
                       />
                       <button
@@ -893,7 +901,7 @@ export default function Home() {
             </button>
           </div>
 
-          <p className="helper-text">{fileSummary(files)}</p>
+          <p className="helper-text">{fileSummary(files.length)}</p>
 
           {status ? (
             <div className="status-banner" role="status">
@@ -906,14 +914,12 @@ export default function Home() {
             <section className="editor-card">
               <div className="section-head">
                 <div>
-                  <p className="panel-label">2. Tjek listen</p>
+                  <p className="panel-label">{REVIEW_OPTIONAL_HEADING}</p>
                   <h3>{draftItems.length > 0 ? "Det her ser jeg" : "Varerne lander her"}</h3>
+                  {draftItems.length > 0 ? (
+                    <p className="empty-copy">{REVIEW_OPTIONAL_SUB}</p>
+                  ) : null}
                 </div>
-                {draftItems.length > 0 ? (
-                  <button type="button" className="quiet-button" onClick={handleSuggest}>
-                    ForeslÃ¥ aftensmad
-                  </button>
-                ) : null}
               </div>
 
               {draftItems.length === 0 ? (
@@ -973,7 +979,7 @@ export default function Home() {
                           >
                             <div className="ingredient-copy">
                               <strong>{displayPantryItem(item)}</strong>
-                              <span>jeg er ikke helt sikker pÃ¥ den</span>
+                              <span>jeg er ikke helt sikker på den</span>
                             </div>
                             <div className="ingredient-actions">
                               <select
@@ -1005,43 +1011,35 @@ export default function Home() {
                   ) : null}
 
                   <div className="manual-box">
-                    <p className="list-label">TilfÃ¸j selv noget jeg ikke fik med</p>
+                    <p className="list-label">Tilføj selv noget jeg ikke fik med</p>
                     <div className="manual-row">
                       <input
                         className="text-input"
                         type="text"
                         value={manualInput}
-                        placeholder="fx mÃ¦lk, ris, revet ost eller broccoli"
+                        placeholder="fx mælk, ris, revet ost eller broccoli"
                         onChange={(event) => setManualInput(event.target.value)}
                         onKeyDown={(event) => {
                           if (event.key === "Enter") handleManualAdd();
                         }}
                       />
                       <button type="button" className="quiet-button" onClick={handleManualAdd}>
-                        TilfÃ¸j
+                        Tilføj
                       </button>
                     </div>
                   </div>
 
-                  {ingredientsDirty ? (
-                    <p className="dirty-note">
-                      Listen er Ã¦ndret. Tryk pÃ¥ <strong>ForeslÃ¥ aftensmad</strong> igen, sÃ¥
-                      opdaterer jeg buddet.
-                    </p>
-                  ) : null}
                 </>
               )}
             </section>
 
             <section className="hero-panel">
-              <p className="panel-label">3. Mit bedste bud</p>
+              <p className="panel-label">Mit bedste bud</p>
 
               {!currentAnswer ? (
                 <div className="hero-empty">
                   <h3>Buddet kommer her</h3>
-                  <p>
-                    NÃ¥r listen ser rigtig ud, fÃ¥r du Ã©t konkret forslag og det, der eventuelt mangler.
-                  </p>
+                  <p>Tag billederne, så kommer buddet af sig selv — med det, der eventuelt mangler.</p>
                 </div>
               ) : hitLimit ? (
                 <div className="out-of-ideas">
@@ -1075,31 +1073,6 @@ export default function Home() {
                     onSurprise={handleSurprise}
                   />
 
-                  {alternatives.length > 0 ? (
-                    <div className="alternatives">
-                      <div className="section-head compact-head">
-                        <div>
-                          <p className="panel-label">Flere muligheder</p>
-                          <h3>Hvis du vil dreje en tand</h3>
-                        </div>
-                      </div>
-
-                      <div className="alternatives-grid">
-                        {alternatives.map(({ answer, index }) => (
-                          <button
-                            type="button"
-                            className="alternative-card"
-                            key={`${answer.recipe.id}-${index}`}
-                            onClick={() => handlePickAlternative(index)}
-                          >
-                            <strong>{answer.recipe.name}</strong>
-                            <span>{answer.recipe.minutes} minutter</span>
-                            <p>{statusLine(answer)}</p>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
                 </>
               )}
             </section>
@@ -1155,7 +1128,7 @@ export default function Home() {
               </div>
 
               <div className="recipe-steps-card">
-                <h3>SÃ¥dan gÃ¸r du</h3>
+                <h3>Sådan gør du</h3>
                 <ol className="recipe-steps">
                   {currentAnswer.recipe.steps.map((step) => (
                     <li key={step}>{step}</li>

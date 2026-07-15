@@ -184,3 +184,36 @@ describe("effectiveConfidence — lagertillid falder med alderen", () => {
     expect(effectiveConfidence(old, NOW)).toBeCloseTo(0.9 - 5 * 0.08, 2);
   });
 });
+
+describe("P4 — tentative-reglen (statusregler): tærskel fra contracts", () => {
+  it("lover ALDRIG har_det_hele når en bærende ingrediens kun er tentativt til stede (0.55)", () => {
+    const pantry: Pantry = {
+      items: [
+        item("kyllingebryst"),
+        item("pasta_skruer"),
+        item("floede", { confidence: 0.55 }), // under ACCEPTED_CONFIDENCE_CUTOFF (0.68)
+        item("loeg"), item("hvidloeg"), item("revet_ost"),
+      ],
+      lastScanAt: NOW,
+      deductions: [],
+    };
+    const a = buildAnswer(SEED_RECIPES[0], pantry, NOW);
+    expect(a.copyKey).toBe("tjek_lige");
+    expect(a.copyKey).not.toBe("har_det_hele");
+  });
+
+  it("accepteret vare (0.70, frisk) giver stadig har_det_hele", () => {
+    const pantry: Pantry = {
+      items: [
+        item("kyllingebryst", { confidence: 0.9 }),
+        item("pasta_skruer", { confidence: 0.9 }),
+        item("floede", { confidence: 0.7 }),
+        item("loeg"), item("hvidloeg"), item("revet_ost"),
+      ],
+      lastScanAt: NOW,
+      deductions: [],
+    };
+    const a = buildAnswer(SEED_RECIPES[0], pantry, NOW);
+    expect(a.copyKey).toBe("har_det_hele");
+  });
+});
