@@ -29,3 +29,13 @@ export function getOpenAIKeyDiagnostics() {
     checkedKeyNames: [...OPENAI_KEY_CANDIDATES],
   };
 }
+
+/** P6: Verificeret 2026-07 mod OpenAI's modelkatalog. gpt-5.6 (alias for Sol)
+ *  er flagskibet; Terra er den dokumenterede balance mellem kvalitet og pris
+ *  og det rigtige default til ugentlige scans. Kan overstyres med
+ *  OPENAI_VISION_MODEL. */
+export const DEFAULT_OPENAI_VISION_MODEL = "gpt-5.6-terra";
+
+export function getOpenAIVisionModel(): string {
+  return process.env.OPENAI_VISION_MODEL ?? DEFAULT_OPENAI_VISION_MODEL;
+}

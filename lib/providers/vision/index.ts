@@ -11,7 +11,7 @@ import {
   getAnthropicKeyDiagnostics,
   getAnthropicKeySource,
 } from "./anthropicConfig";
-import { getOpenAIKeyDiagnostics, getOpenAIKeySource } from "./openaiConfig";
+import { getOpenAIKeyDiagnostics, getOpenAIKeySource, getOpenAIVisionModel } from "./openaiConfig";
 
 const DEFAULT_VISION_PROVIDER: ProviderName = "openai";
 
@@ -61,7 +61,7 @@ export function getVisionProviderDiagnostics() {
         provider,
         providerSelectionMode,
         explicitProvider,
-        providerModel: process.env.OPENAI_VISION_MODEL ?? "gpt-5.6",
+        providerModel: getOpenAIVisionModel(),
         ...availableKeys,
       };
     case "claude":

@@ -1,6 +1,7 @@
 /**
- * VOKABULAR — genereres ALTID fra ret-kataloget.
- * Retter og vokabular kan derfor aldrig divergere (trin 1-beslutning).
+ * VOKABULAR — genereres fra INGREDIENS-REGISTRET (supersæt af opskrifterne).
+ * Registret må kende varer, ingen ret bruger endnu (fx ketchup).
+ * recipeEngine.validateRecipe sikrer, at opskrifter kun bruger registrerede id'er.
  */
 import { buildIngredientVocabulary } from "./ingredientRegistry";
 
