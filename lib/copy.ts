@@ -88,8 +88,10 @@ export const SCAN_STATUS = {
   looking: "Jeg kigger lige i køleskabet.",
   foundNothing: "Jeg fandt ikke nok endnu. Tilføj gerne et par ting selv.",
   writeItemFirst: "Skriv en vare først.",
+  /* Allans regel: aldrig en fejl — altid et naturligt næste skridt.
+     Nævner begge veje videre (billede ELLER manuel vare), intet fagsprog. */
   noGoodDish:
-    "Jeg kan ikke finde en god hverdagsret ud fra det her endnu. Tilføj gerne noget mere bærende.",
+    "Jeg mangler lige et par flere ingredienser, før jeg kan anbefale en ret. Tag gerne et billede mere eller tilføj et par varer.",
 } as const;
 
 export function fileSummary(count: number): string {
