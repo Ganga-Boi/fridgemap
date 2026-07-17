@@ -107,7 +107,10 @@ export interface ScanAnalysisRequest {
   vocabulary: string[];           // kanoniske ingrediens-id'er fra registry
 }
 
+export type ScanSceneType = "food" | "non_food";
+
 export interface ScanAnalysisResponse {
+  sceneType: ScanSceneType;       // stop tidligt hvis billedet ikke viser mad/dagligvarer
   items: {
     rawLabel: string;             // frit fund, fx "Heinz ketchup, halv flaske"
     ingredientId: string | null;  // registry-id hvis sikkert match, ellers null

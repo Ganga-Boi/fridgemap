@@ -44,6 +44,13 @@ export async function POST(request: Request) {
       vocabulary: buildVocabulary(),
     });
 
+    if (result.sceneType === "non_food") {
+      return json({
+        ok: false,
+        error: "NON_FOOD_IMAGE",
+      });
+    }
+
     const items = [...result.items].sort((a, b) => b.confidence - a.confidence);
     return json({ ok: true, items });
   } catch (error) {

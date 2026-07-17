@@ -22,6 +22,7 @@ describe("AnthropicVisionProvider", () => {
           {
             type: "text",
             text: JSON.stringify({
+              sceneType: "food",
               items: [
                 {
                   rawLabel: "Heinz ketchup",
@@ -51,17 +52,20 @@ describe("AnthropicVisionProvider", () => {
     expect(payload.messages[0].content[0].type).toBe("image");
     expect(payload.messages[0].content[1].type).toBe("text");
 
-    expect(result.items).toEqual([
-      {
-        rawLabel: "Heinz ketchup",
-        ingredientId: "ketchup",
-        quantity: "noget",
-        confidence: 0.93,
-      },
-    ]);
+    expect(result).toEqual({
+      sceneType: "food",
+      items: [
+        {
+          rawLabel: "Heinz ketchup",
+          ingredientId: "ketchup",
+          quantity: "noget",
+          confidence: 0.93,
+        },
+      ],
+    });
   });
 
-  it("fejler tydeligt hvis Claude-nøglen mangler", async () => {
+  it("fejler tydeligt hvis Claude-noeglen mangler", async () => {
     const provider = new AnthropicVisionProvider();
 
     await expect(
