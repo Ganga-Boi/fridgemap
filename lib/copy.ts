@@ -111,6 +111,8 @@ export function fileSummary(count: number): string {
 
 export function scanErrorMessage(error: string | undefined): string {
   switch (error) {
+    case "NON_FOOD_IMAGE":
+      return "Det her ligner ikke mad eller dagligvarer. Tag et billede af indholdet i køleskabet i stedet.";
     case "OPENAI_API_KEY_MISSING":
       return "Jeg mangler stadig nøglen til billedforståelsen i produktion.";
     case "ANTHROPIC_API_KEY_MISSING":

@@ -17,9 +17,14 @@ export function parseAndValidateVisionResponse(
     throw new Error("VISION_JSON_PARSE_ERROR");
   }
 
+  const sceneType = parsed?.sceneType === "non_food" ? "non_food" : "food";
   const rawItems = Array.isArray(parsed?.items) ? parsed.items : [];
   const items: ScanAnalysisResponse["items"] = [];
   const seen = new Set<string>();
+
+  if (sceneType === "non_food") {
+    return { sceneType, items: [] };
+  }
 
   for (const it of rawItems) {
     const providerRawLabel = typeof it?.rawLabel === "string" ? it.rawLabel.trim() : "";
@@ -49,5 +54,5 @@ export function parseAndValidateVisionResponse(
     items.push({ rawLabel, ingredientId, quantity, confidence });
   }
 
-  return { items };
+  return { sceneType, items };
 }

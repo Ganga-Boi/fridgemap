@@ -1,14 +1,6 @@
 /**
- * VISION PROVIDERS — Allans regel 3 i praksis.
- * ============================================
+ * VISION PROVIDERS - Allans regel 3 i praksis.
  * Resten af appen importerer KUN getVisionProvider().
- * Leverandørskift (OpenAI → Claude → Gemini → lokal) = ændr VISION_PROVIDER
- * i miljøvariablerne. Nul ændringer i frontend eller forretningslogik.
- *
- * Arvet fra FridgeMap (api/analyze/index.js):
- *  - OpenAI responses-API-mønsteret inkl. robust output_text-udtræk
- *  - Loft på antal billeder pr. kald
- *  - "Returnér KUN JSON"-systemprompten (nu skærpet med vokabular-tvang)
  */
 
 import type {
@@ -19,8 +11,6 @@ import type {
 import { parseAndValidateVisionResponse } from "./scanContract";
 import { getOpenAIKey, getOpenAIVisionModel } from "./openaiConfig";
 
-/* ---------------- OpenAI-implementering ----------------------------- */
-
 const MAX_IMAGES = 4;
 
 export class OpenAIVisionProvider implements VisionProvider {
@@ -29,16 +19,19 @@ export class OpenAIVisionProvider implements VisionProvider {
     if (!apiKey) throw new Error("OPENAI_API_KEY mangler");
 
     const system = [
-      "Du analyserer billeder af et køleskab og identificerer madvarer.",
-      "Detekter frit det du faktisk ser: emballage, mærkevarer, rester, glas, flasker og halve varer.",
-      "Hvis du kan mappe et fund sikkert til et ingrediens-id fra denne liste, så brug det.",
-      "Hvis du IKKE kan mappe sikkert, skal ingredientId være null. Gæt ALDRIG en nabo-ingrediens.",
-      "Brug rawLabel til det du faktisk ser på billedet, også når ingredientId er null.",
+      "Du analyserer billeder af et koeleskab og identificerer madvarer.",
+      "Vurder foerst om billederne faktisk viser mad, drikkevarer, dagligvarer eller indhold fra et koeleskab eller skab.",
+      "Hvis billederne primaert viser noget andet end mad eller dagligvarer, fx en bog, et menneske eller et rum, skal sceneType vaere non_food og items skal vaere en tom liste.",
+      "Detekter frit det du faktisk ser: emballage, maerkevarer, rester, glas, flasker og halve varer.",
+      "Hvis du kan mappe et fund sikkert til et ingrediens-id fra denne liste, saa brug det.",
+      "Hvis du IKKE kan mappe sikkert, skal ingredientId vaere null. Gaet ALDRIG en nabo-ingrediens.",
+      "Brug rawLabel til det du faktisk ser paa billedet, ogsaa naar ingredientId er null.",
       "Mulige ingrediens-id'er:",
       req.vocabulary.join(", "),
       "",
-      "Returnér KUN gyldig JSON efter dette skema, ingen forklaring, ingen markdown:",
-      '{ "items": [ { "rawLabel": "<det du ser>",',
+      "Returner KUN gyldig JSON efter dette skema, ingen forklaring, ingen markdown:",
+      '{ "sceneType": "food" | "non_food",',
+      '  "items": [ { "rawLabel": "<det du ser>",',
       '               "ingredientId": "<id fra listen>" | null,',
       '               "quantity": "rigeligt" | "noget" | "lidt",',
       '               "confidence": <tal 0-1> } ] }',
@@ -51,7 +44,10 @@ export class OpenAIVisionProvider implements VisionProvider {
         {
           role: "user",
           content: [
-            { type: "input_text", text: "Identificér madvarerne på billederne. Kun JSON." },
+            {
+              type: "input_text",
+              text: "Identificer madvarerne paa billederne. Hvis det ikke er mad, returner sceneType non_food og en tom liste. Kun JSON.",
+            },
             ...req.frames.slice(0, MAX_IMAGES).map((dataUrl) => ({
               type: "input_image",
               image_url: dataUrl,
@@ -82,17 +78,18 @@ export class OpenAIVisionProvider implements VisionProvider {
   }
 }
 
-/* ---------------- Arvet: robust tekst-udtræk fra responses-API ------ */
-
 function extractOutputText(data: any): string {
   if (typeof data.output_text === "string" && data.output_text) return data.output_text.trim();
   let text = "";
   if (Array.isArray(data.output)) {
-    for (const itm of data.output) {
-      if (itm?.type === "message" && Array.isArray(itm.content)) {
-        for (const c of itm.content) {
-          if ((c?.type === "output_text" || c?.type === "text") && typeof c.text === "string") {
-            text += c.text;
+    for (const item of data.output) {
+      if (item?.type === "message" && Array.isArray(item.content)) {
+        for (const content of item.content) {
+          if (
+            (content?.type === "output_text" || content?.type === "text") &&
+            typeof content.text === "string"
+          ) {
+            text += content.text;
           }
         }
       }
@@ -100,4 +97,3 @@ function extractOutputText(data: any): string {
   }
   return text.trim();
 }
-
