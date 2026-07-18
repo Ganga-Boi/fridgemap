@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import AnswerCard from "../components/AnswerCard";
+import Onboarding from "../components/Onboarding";
 import {
   BUTTONS,
   CAMERA_FALLBACK,
@@ -28,11 +29,19 @@ import {
   rejectCurrentSuggestion,
 } from "../lib/homeState";
 import { DEFAULT_HOUSEHOLD } from "../lib/household";
+import {
+  EMPTY_IMPACT,
+  ESTIMATED_VALUE_PER_INGREDIENT_DKK,
+  readImpactStats,
+  recordRescuedMeal,
+  type ImpactStats,
+} from "../lib/impact";
 import { buildIngredientRegistry, normalizeIngredientLookup } from "../lib/ingredientRegistry";
 import { buildAnswer, filterCandidates, rankFallback, type RankedRecipe } from "../lib/matcher";
 import { allApprovedRecipes } from "../lib/recipes/recipeEngine";
 import {
   ACCEPTED_CONFIDENCE_CUTOFF,
+  type Household,
   type Pantry,
   type PantryItem,
   type ScanAnalysisResponse,
@@ -43,9 +52,9 @@ const MAX_FRAMES = 4;
 const MAX_IMAGE_DIMENSION = 1280; // P1: klientkomprimering (Vercel-grænse ~4,5 MB)
 const JPEG_QUALITY = 0.72;
 const APPROVED_RECIPES = allApprovedRecipes();
-const HOUSEHOLD_PROFILE = DEFAULT_HOUSEHOLD;
-const CANDIDATE_RECIPES = filterCandidates(APPROVED_RECIPES, HOUSEHOLD_PROFILE);
 const INGREDIENT_REGISTRY = buildIngredientRegistry();
+const HOUSEHOLD_STORAGE_KEY = "fridgemap.household.v1";
+const IMPACT_STORAGE_KEY = "fridgemap.impact.v1";
 
 type ScanRouteResponse = {
   ok: boolean;
@@ -161,17 +170,46 @@ function createPantry(items: PantryItem[], lastScanAt: string, previous: Pantry 
   };
 }
 
-function buildSuggestionDeck(pantry: Pantry, now: Date) {
+function buildSuggestionDeck(
+  pantry: Pantry,
+  now: Date,
+  candidates: RankedRecipe["recipe"][],
+  household: Household
+) {
   return applyEveningRule(
     rankFallback(
-      CANDIDATE_RECIPES,
+      candidates,
       pantry,
-      HOUSEHOLD_PROFILE,
+      household,
       pantry.deductions,
       now.toISOString()
     ),
     now.getHours()
   );
+}
+
+function readHousehold(value: string | null): Household | null {
+  if (!value) return null;
+
+  try {
+    const parsed = JSON.parse(value) as Household;
+    if (!Number.isFinite(parsed.adults) || !Number.isFinite(parsed.children)) return null;
+    if (
+      !Array.isArray(parsed.allergies) ||
+      !Array.isArray(parsed.dislikedIngredients) ||
+      !Array.isArray(parsed.likedRecipeIds)
+    ) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function greeting(now: Date) {
+  const hour = now.getHours();
+  if (hour < 10) return "Godmorgen";
+  if (hour < 17) return "God eftermiddag";
+  return "Godaften";
 }
 
 function pickSurpriseIndex(deck: RankedRecipe[]) {
@@ -291,6 +329,16 @@ export default function Home() {
   const [touchLikeDevice, setTouchLikeDevice] = useState(false);
   const [showRecipe, setShowRecipe] = useState(false);
   const [suggestionState, setSuggestionState] = useState(createInitialSuggestionState());
+  const [household, setHousehold] = useState<Household>(DEFAULT_HOUSEHOLD);
+  const [hasSavedHousehold, setHasSavedHousehold] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [impact, setImpact] = useState<ImpactStats>(EMPTY_IMPACT);
+  const [celebration, setCelebration] = useState<string | null>(null);
+
+  const candidateRecipes = useMemo(
+    () => filterCandidates(APPROVED_RECIPES, household),
+    [household]
+  );
 
   const groupedItems = useMemo(() => {
     const sorted = sortDraftItems(draftItems).map((item, index) => ({ item, index }));
@@ -300,7 +348,9 @@ export default function Home() {
     };
   }, [draftItems]);
 
-  const suggestionDeck = committedPantry ? buildSuggestionDeck(committedPantry, new Date()) : [];
+  const suggestionDeck = committedPantry
+    ? buildSuggestionDeck(committedPantry, new Date(), candidateRecipes, household)
+    : [];
   const currentIndex = suggestionDeck.length > 0
     ? Math.min(suggestionState.cursor, suggestionDeck.length - 1)
     : 0;
@@ -337,6 +387,18 @@ export default function Home() {
 
   useEffect(() => {
     setTouchLikeDevice(isTouchLikeDevice());
+  }, []);
+
+  useEffect(() => {
+    const savedHousehold = readHousehold(window.localStorage.getItem(HOUSEHOLD_STORAGE_KEY));
+    if (savedHousehold) {
+      setHousehold(savedHousehold);
+      setHasSavedHousehold(true);
+    } else {
+      setOnboardingOpen(true);
+    }
+
+    setImpact(readImpactStats(window.localStorage.getItem(IMPACT_STORAGE_KEY)));
   }, []);
 
   useEffect(() => {
@@ -507,7 +569,7 @@ export default function Home() {
    *  sig selv, brugeren skal aldrig trykke "foreslå" (produktloven). */
   function commitAndSuggest(items: PantryItem[], seenAt: string) {
     const pantry = createPantry(items, seenAt, committedPantry);
-    const deck = buildSuggestionDeck(pantry, new Date());
+    const deck = buildSuggestionDeck(pantry, new Date(), candidateRecipes, household);
 
     setCommittedPantry(pantry);
     setSuggestionState(createInitialSuggestionState());
@@ -707,24 +769,119 @@ export default function Home() {
     setStatus(statusLine(answer));
   }
 
+  function handleSaveHousehold(nextHousehold: Household) {
+    setHousehold(nextHousehold);
+    setHasSavedHousehold(true);
+    setOnboardingOpen(false);
+    window.localStorage.setItem(HOUSEHOLD_STORAGE_KEY, JSON.stringify(nextHousehold));
+  }
+
+  function handleMadeIt() {
+    if (!currentAnswer || !committedPantry) return;
+
+    const pantryIngredientIds = new Set(
+      committedPantry.items
+        .map((item) => item.ingredientId)
+        .filter((ingredientId): ingredientId is string => Boolean(ingredientId))
+    );
+    const usedIngredients = new Set(
+      currentAnswer.recipe.ingredients
+        .map((ingredient) => ingredient.ingredientId)
+        .filter((ingredientId) => pantryIngredientIds.has(ingredientId))
+    ).size;
+    const rescueKey = `${currentAnswer.recipe.id}:${committedPantry.lastScanAt ?? "manual"}`;
+    const rescuedAt = new Date().toISOString();
+
+    setImpact((current) => {
+      const next = recordRescuedMeal(current, rescueKey, usedIngredients, rescuedAt);
+      if (next !== current) {
+        window.localStorage.setItem(IMPACT_STORAGE_KEY, JSON.stringify(next));
+      }
+      return next;
+    });
+    setCelebration(
+      usedIngredients > 0
+        ? `Flot — ${usedIngredients} ${usedIngredients === 1 ? "vare" : "varer"} blev brugt i stedet for glemt.`
+        : "Flot — retten er føjet til jeres madspildsrejse."
+    );
+    window.setTimeout(() => setCelebration(null), 4800);
+  }
+
   const canAddMorePhotos = files.length < MAX_FRAMES;
   const hasRoundActivity = Boolean(
     files.length || draftItems.length || committedPantry || status || loading || cameraOpen
   );
   const hasScanResult = Boolean(lastScanAt || draftItems.length || committedPantry);
+  const people = household.adults + household.children;
+  const rescueKey = currentAnswer && committedPantry
+    ? `${currentAnswer.recipe.id}:${committedPantry.lastScanAt ?? "manual"}`
+    : null;
+  const alreadyRescued = rescueKey ? impact.savedKeys.includes(rescueKey) : false;
 
   return (
     <main className="page-shell">
-      <div className="page-header">
-        <div className="brand-mark">FM</div>
-        <div className="brand-copy">
-          <p className="kicker">FridgeMap</p>
-          <h1>Tag billeder af køleskabet. Få ét godt bud til aftensmad.</h1>
-          <p className="lead">{ONBOARDING_LEAD}</p>
+      <Onboarding
+        initial={household}
+        open={onboardingOpen}
+        canClose={hasSavedHousehold}
+        onClose={() => setOnboardingOpen(false)}
+        onSave={handleSaveHousehold}
+      />
+
+      {celebration ? (
+        <div className="celebration-toast" role="status">
+          <span aria-hidden="true">✦</span>
+          {celebration}
         </div>
-      </div>
+      ) : null}
+
+      <header className="app-topbar">
+        <div className="compact-brand">
+          <span className="compact-brand-mark" aria-hidden="true">F</span>
+          <span>
+            <strong>FridgeMap</strong>
+            <small>Mindre madspild. Mere aftensmad.</small>
+          </span>
+        </div>
+        <button type="button" className="profile-button" onClick={() => setOnboardingOpen(true)}>
+          <span aria-hidden="true">⌂</span>
+          {people} {people === 1 ? "person" : "personer"}
+        </button>
+      </header>
 
       <div className="page-body">
+        <section className="welcome-card">
+          <div className="welcome-copy">
+            <span className="welcome-badge"><i aria-hidden="true" /> Jeres køkken i dag</span>
+            <h1>{greeting(new Date())}. Hvad skal vi redde fra køleskabet?</h1>
+            <p>{ONBOARDING_LEAD}</p>
+            <button type="button" className="text-link" onClick={() => setOnboardingOpen(true)}>
+              Tilpas husstand og allergier
+            </button>
+          </div>
+
+          <div className="impact-card" aria-label="Jeres madspildsoverblik">
+            <div className="impact-heading">
+              <div>
+                <span className="impact-kicker">Jeres madspildsrejse</span>
+                <strong>{impact.mealsRescued > 0 ? "Det virker allerede" : "Første redning venter"}</strong>
+              </div>
+              <span className="impact-leaf" aria-hidden="true">↗</span>
+            </div>
+            <div className="impact-stats">
+              <div><strong>{impact.mealsRescued}</strong><span>retter reddet</span></div>
+              <div><strong>{impact.ingredientsUsed}</strong><span>varer brugt</span></div>
+              <div><strong>ca. {impact.estimatedSavingsDkk} kr.</strong><span>værdi reddet*</span></div>
+            </div>
+            <div className="impact-progress" aria-hidden="true">
+              <span style={{ width: `${Math.min(100, impact.mealsRescued * 20)}%` }} />
+            </div>
+            <small>*Tidligt estimat: {ESTIMATED_VALUE_PER_INGREDIENT_DKK} kr. pr. brugt vare.</small>
+          </div>
+          <span className="food-orbit food-orbit--one" aria-hidden="true">🍅</span>
+          <span className="food-orbit food-orbit--two" aria-hidden="true">🥕</span>
+        </section>
+
         <section className={`scan-panel${hasRoundActivity ? "" : " scan-panel--intro"}`}>
           <div className="panel-heading">
             <div>
@@ -1101,6 +1258,22 @@ export default function Home() {
                   ))}
                 </ol>
               </div>
+            </div>
+
+            <div className={`rescue-card${alreadyRescued ? " is-complete" : ""}`}>
+              <div className="rescue-icon" aria-hidden="true">{alreadyRescued ? "✓" : "✦"}</div>
+              <div>
+                <p className="panel-label">Luk cirklen</p>
+                <h3>{alreadyRescued ? "Den er registreret" : "Blev det til retten?"}</h3>
+                <p>
+                  {alreadyRescued
+                    ? "Jeres overblik er opdateret — og den samme ret bliver ikke talt to gange."
+                    : "Bekræft, så viser FridgeMap hvor meget I får brugt i stedet for at smide ud."}
+                </p>
+              </div>
+              <button type="button" onClick={handleMadeIt} disabled={alreadyRescued}>
+                {alreadyRescued ? "Registreret" : BUTTONS.madeIt}
+              </button>
             </div>
           </section>
         ) : null}
