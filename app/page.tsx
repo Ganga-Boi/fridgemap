@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import AnswerCard from "../components/AnswerCard";
 import {
   BUTTONS,
@@ -45,22 +45,6 @@ const APPROVED_RECIPES = allApprovedRecipes();
 const HOUSEHOLD_PROFILE = DEFAULT_HOUSEHOLD;
 const CANDIDATE_RECIPES = filterCandidates(APPROVED_RECIPES, HOUSEHOLD_PROFILE);
 const INGREDIENT_REGISTRY = buildIngredientRegistry();
-const FILE_TRIGGER_LABEL_STYLE: CSSProperties = {
-  position: "relative",
-  overflow: "hidden",
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-};
-const FILE_TRIGGER_INPUT_STYLE: CSSProperties = {
-  position: "absolute",
-  inset: 0,
-  width: "100%",
-  height: "100%",
-  opacity: 0,
-  cursor: "pointer",
-};
-
 type ScanRouteResponse = {
   ok: boolean;
   items?: ScanAnalysisResponse["items"];
@@ -324,6 +308,8 @@ export default function Home() {
     ? buildAnswer(currentRanked.recipe, committedPantry, new Date().toISOString())
     : null;
   const hitLimit = suggestionState.rejections >= MAX_REJECTIONS;
+  const canAddMorePhotos = files.length < MAX_FRAMES;
+  const filePickerDisabled = cameraBusy || loading || !canAddMorePhotos;
   const filePreviews = useMemo(
     () =>
       files.map((file, index) => ({
@@ -366,8 +352,19 @@ export default function Home() {
     if (nativeCameraInputRef.current) nativeCameraInputRef.current.value = "";
   }
 
+  function openPicker(inputRef: MutableRefObject<HTMLInputElement | null>) {
+    if (filePickerDisabled) return;
+
+    const input = inputRef.current;
+    if (!input) return;
+
+    // Reset first so mobile browsers also emit an event when the same camera app is reused.
+    input.value = "";
+    input.click();
+  }
+
   function openNativeCamera() {
-    nativeCameraInputRef.current?.click();
+    openPicker(nativeCameraInputRef);
   }
 
   function releaseCameraStream() {
@@ -401,7 +398,7 @@ export default function Home() {
       return;
     }
     setStatus(CAMERA_FALLBACK.desktop);
-    galleryInputRef.current?.click();
+    openPicker(galleryInputRef);
   }
 
   async function handleOpenCamera() {
@@ -565,6 +562,52 @@ export default function Home() {
     setStatus(SCAN_STATUS.photoAdded);
   }
 
+  function handleFileInputSelection(input: HTMLInputElement | null) {
+    handlePickedFiles(Array.from(input?.files || []));
+  }
+
+  function renderFileTrigger({
+    className,
+    label,
+    inputRef,
+    accept,
+    multiple = false,
+    capture,
+  }: {
+    className: string;
+    label: string;
+    inputRef: MutableRefObject<HTMLInputElement | null>;
+    accept: string;
+    multiple?: boolean;
+    capture?: "environment";
+  }) {
+    return (
+      <>
+        <button
+          type="button"
+          className={className}
+          onClick={() => openPicker(inputRef)}
+          disabled={filePickerDisabled}
+        >
+          {label}
+        </button>
+        <input
+          ref={inputRef}
+          className="sr-only-input"
+          type="file"
+          accept={accept}
+          multiple={multiple}
+          capture={capture}
+          disabled={filePickerDisabled}
+          tabIndex={-1}
+          aria-hidden="true"
+          onChange={(event) => handleFileInputSelection(event.currentTarget)}
+          onInput={(event) => handleFileInputSelection(event.currentTarget as HTMLInputElement)}
+        />
+      </>
+    );
+  }
+
   function resetAll() {
     stopCamera();
     setFiles([]);
@@ -723,8 +766,21 @@ export default function Home() {
     setStatus(statusLine(answer));
   }
 
-  const canAddMorePhotos = files.length < MAX_FRAMES;
   const showDirectNativeInput = touchLikeDevice;
+  const nativeCameraTrigger = renderFileTrigger({
+    className: "cta-button",
+    label: BUTTONS.usePhoneCamera,
+    inputRef: nativeCameraInputRef,
+    accept: "image/*",
+    capture: "environment",
+  });
+  const galleryTrigger = renderFileTrigger({
+    className: "quiet-button",
+    label: BUTTONS.useGallery,
+    inputRef: galleryInputRef,
+    accept: "image/*",
+    multiple: true,
+  });
 
   return (
     <main className="page-shell">
@@ -792,14 +848,7 @@ export default function Home() {
                 </div>
               ) : showDirectNativeInput ? (
                 <div className="camera-actions">
-                  <input
-                    ref={nativeCameraInputRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    disabled={cameraBusy || loading || !canAddMorePhotos}
-                    onChange={(event) => handlePickedFiles(Array.from(event.target.files || []))}
-                  />
+                  {nativeCameraTrigger}
 
                   {canUseLiveCamera ? (
                     <button
@@ -812,32 +861,11 @@ export default function Home() {
                     </button>
                   ) : null}
 
-                  <input
-                    ref={galleryInputRef}
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    disabled={cameraBusy || loading || !canAddMorePhotos}
-                    onChange={(event) => handlePickedFiles(Array.from(event.target.files || []))}
-                  />
+                  {galleryTrigger}
                 </div>
               ) : (
                 <div className="camera-actions">
-                  <label
-                    className="cta-button picker-fallback"
-                    style={FILE_TRIGGER_LABEL_STYLE}
-                  >
-                    <span>Brug telefonens kamera</span>
-                    <input
-                      ref={nativeCameraInputRef}
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      style={FILE_TRIGGER_INPUT_STYLE}
-                      disabled={cameraBusy || loading || !canAddMorePhotos}
-                      onChange={(event) => handlePickedFiles(Array.from(event.target.files || []))}
-                    />
-                  </label>
+                  {nativeCameraTrigger}
 
                   {canUseLiveCamera ? (
                     <button
@@ -850,21 +878,7 @@ export default function Home() {
                     </button>
                   ) : null}
 
-                  <label
-                    className="quiet-button picker-fallback"
-                    style={FILE_TRIGGER_LABEL_STYLE}
-                  >
-                    <span>{BUTTONS.useGallery}</span>
-                    <input
-                      ref={galleryInputRef}
-                      type="file"
-                      accept="image/*"
-                      multiple
-                      style={FILE_TRIGGER_INPUT_STYLE}
-                      disabled={cameraBusy || loading || !canAddMorePhotos}
-                      onChange={(event) => handlePickedFiles(Array.from(event.target.files || []))}
-                    />
-                  </label>
+                  {galleryTrigger}
                 </div>
               )}
               {cameraError ? <p className="camera-error">{cameraError}</p> : null}

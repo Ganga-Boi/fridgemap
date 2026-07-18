@@ -47,6 +47,7 @@ export const BUTTONS = {
   madeIt: "Vi lavede den",
   tryAgain: "Tag en ny runde",
   inspectPhotos: "Se hvad jeg fandt",
+  usePhoneCamera: "Brug telefonens kamera",
   useGallery: "Brug billeder du allerede har",
 } as const;
 
