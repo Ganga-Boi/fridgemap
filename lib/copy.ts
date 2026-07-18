@@ -41,13 +41,14 @@ function liste(names: string[]): string {
 }
 
 export const BUTTONS = {
+  takePhotos: "Tag billeder",
   showRecipe: "Vis retten",
   somethingElse: "Noget andet",
   surprise: "Overrask mig",
   madeIt: "Vi lavede den",
   tryAgain: "Tag en ny runde",
   inspectPhotos: "Se hvad jeg fandt",
-  useGallery: "Brug billeder du allerede har",
+  useGallery: "Vælg fra telefonen",
 } as const;
 
 export const LOADING_HEADLINE = "Et øjeblik.";
@@ -57,6 +58,11 @@ export const ONBOARDING_LEAD =
 
 export const CAMERA_HELP =
   "Start med køleskabet. Brug kun billeder du allerede har, hvis de ligger på telefonen.";
+
+export const SCAN_LEAD = "Så finder vi retter, du kan lave.";
+
+export const SCAN_REASSURANCE =
+  "Du kan gennemse billederne, før de sendes.";
 
 export const SCAN_TIPS = [
   "Én hylde ad gangen",
