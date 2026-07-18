@@ -194,6 +194,9 @@ export const SCAN_STATUS = {
   photoAdded: "Billede tilføjet. Tag gerne et mere fra en anden vinkel.",
   keepingFirstFour: "Jeg holder mig til de første 4 billeder, så scanningen forbliver skarp.",
   looking: "Jeg kigger lige i køleskabet.",
+  photoReadFailed:
+    "Jeg mistede adgangen til billedet. Vælg eller tag det igen, så prøver vi med det samme.",
+  scanFailed: "Jeg kunne ikke læse billedet denne gang. Prøv gerne igen om et øjeblik.",
   foundNothing: "Jeg fandt ikke nok endnu. Tilføj gerne et par ting selv.",
   writeItemFirst: "Skriv en vare først.",
   /* Allans regel: aldrig en fejl — altid et naturligt næste skridt.

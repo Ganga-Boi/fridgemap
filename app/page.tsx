@@ -217,6 +217,34 @@ function mergeSelectedFiles(current: File[], incoming: File[]) {
   return merged.slice(0, MAX_FRAMES);
 }
 
+/** Androids dokumentvælger kan tilbagekalde sin midlertidige filreference,
+ *  så snart change-eventet er slut. Kopiér derfor bytes med det samme til en
+ *  selvstændig File, som appen ejer, før brugeren når videre til scanning. */
+async function materializePickedFiles(files: File[]) {
+  return Promise.all(
+    files.slice(0, MAX_FRAMES).map(async (file, index) => {
+      const bytes = await file.arrayBuffer();
+      return new File([bytes], file.name || `fridgemap-upload-${index + 1}.jpg`, {
+        type: file.type || "image/jpeg",
+        lastModified: file.lastModified || Date.now(),
+      });
+    })
+  );
+}
+
+function isPhotoReadError(error: unknown) {
+  const name =
+    typeof DOMException !== "undefined" && error instanceof DOMException
+      ? error.name
+      : "";
+  const message = error instanceof Error ? error.message : String(error);
+
+  return (
+    ["NotReadableError", "NotFoundError", "SecurityError"].includes(name) ||
+    /requested file could not be read|permission|file.*read/i.test(message)
+  );
+}
+
 
 function quantityLabel(quantity: PantryItem["quantity"]) {
   switch (quantity) {
@@ -570,24 +598,30 @@ export default function Home() {
     }
   }
 
-  function handlePickedFiles(nextFiles: File[]) {
+  async function handlePickedFiles(nextFiles: File[]) {
     if (!nextFiles.length) {
       resetPickerInputs();
       return;
     }
 
-    const merged = mergeSelectedFiles(files, nextFiles);
-    setFiles(merged);
-    stopCamera();
-    setCameraError(null);
-    resetPickerInputs();
+    try {
+      const durableFiles = await materializePickedFiles(nextFiles);
+      const merged = mergeSelectedFiles(files, durableFiles);
+      setFiles(merged);
+      stopCamera();
+      setCameraError(null);
 
-    if (merged.length < files.length + nextFiles.length) {
-      setStatus(SCAN_STATUS.keepingFirstFour);
-      return;
+      if (merged.length < files.length + durableFiles.length) {
+        setStatus(SCAN_STATUS.keepingFirstFour);
+        return;
+      }
+
+      setStatus(SCAN_STATUS.photoAdded);
+    } catch {
+      setStatus(SCAN_STATUS.photoReadFailed);
+    } finally {
+      resetPickerInputs();
     }
-
-    setStatus(SCAN_STATUS.photoAdded);
   }
 
   function handleCompleteOnboarding(profile: OnboardingProfile) {
@@ -648,8 +682,7 @@ export default function Home() {
       // P2 — produktloven: scan → svar direkte. Ingen port.
       commitAndSuggest(sorted, seenAt);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setStatus(`Fejl: ${message}`);
+      setStatus(isPhotoReadError(error) ? SCAN_STATUS.photoReadFailed : SCAN_STATUS.scanFailed);
     } finally {
       setLoading(false);
     }
