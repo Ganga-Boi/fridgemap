@@ -1,17 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import AnswerCard from "../components/AnswerCard";
 import {
   BUTTONS,
   CAMERA_FALLBACK,
-  CAMERA_HELP,
   EMPTY_PANTRY,
   LOADING_HEADLINE,
   ONBOARDING_LEAD,
   OUT_OF_IDEAS,
   REVIEW_OPTIONAL_HEADING,
   REVIEW_OPTIONAL_SUB,
+  SCAN_LEAD,
+  SCAN_REASSURANCE,
   SCAN_STATUS,
   SCAN_TIPS,
   addedToList,
@@ -45,21 +46,6 @@ const APPROVED_RECIPES = allApprovedRecipes();
 const HOUSEHOLD_PROFILE = DEFAULT_HOUSEHOLD;
 const CANDIDATE_RECIPES = filterCandidates(APPROVED_RECIPES, HOUSEHOLD_PROFILE);
 const INGREDIENT_REGISTRY = buildIngredientRegistry();
-const FILE_TRIGGER_LABEL_STYLE: CSSProperties = {
-  position: "relative",
-  overflow: "hidden",
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-};
-const FILE_TRIGGER_INPUT_STYLE: CSSProperties = {
-  position: "absolute",
-  inset: 0,
-  width: "100%",
-  height: "100%",
-  opacity: 0,
-  cursor: "pointer",
-};
 
 type ScanRouteResponse = {
   ok: boolean;
@@ -302,7 +288,6 @@ export default function Home() {
   const [cameraBusy, setCameraBusy] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
-  const [canUseLiveCamera, setCanUseLiveCamera] = useState(false);
   const [touchLikeDevice, setTouchLikeDevice] = useState(false);
   const [showRecipe, setShowRecipe] = useState(false);
   const [suggestionState, setSuggestionState] = useState(createInitialSuggestionState());
@@ -351,7 +336,6 @@ export default function Home() {
   }, [showRecipe]);
 
   useEffect(() => {
-    setCanUseLiveCamera(Boolean(navigator.mediaDevices?.getUserMedia));
     setTouchLikeDevice(isTouchLikeDevice());
   }, []);
 
@@ -724,7 +708,10 @@ export default function Home() {
   }
 
   const canAddMorePhotos = files.length < MAX_FRAMES;
-  const showDirectNativeInput = touchLikeDevice;
+  const hasRoundActivity = Boolean(
+    files.length || draftItems.length || committedPantry || status || loading || cameraOpen
+  );
+  const hasScanResult = Boolean(lastScanAt || draftItems.length || committedPantry);
 
   return (
     <main className="page-shell">
@@ -738,29 +725,27 @@ export default function Home() {
       </div>
 
       <div className="page-body">
-        <section className="scan-panel">
+        <section className={`scan-panel${hasRoundActivity ? "" : " scan-panel--intro"}`}>
           <div className="panel-heading">
             <div>
               <p className="panel-label">Kig i køleskabet</p>
-              <h2>Start med 2-4 tydelige billeder</h2>
+              <h2>Tag 2–4 billeder</h2>
+              <p className="scan-lead">{SCAN_LEAD}</p>
               <ul className="scan-tips">
                 {SCAN_TIPS.map((tip) => (
                   <li key={tip}>{tip}</li>
                 ))}
               </ul>
             </div>
-            <button type="button" className="quiet-button" onClick={resetAll}>
-              Ny runde
-            </button>
+            {hasRoundActivity ? (
+              <button type="button" className="round-reset" onClick={resetAll}>
+                Start forfra
+              </button>
+            ) : null}
           </div>
 
           <div className="scan-controls">
-            <div className="file-picker camera-picker">
-              <div className="camera-copy">
-                <span>Brug kameraet på telefonen</span>
-                <p className="camera-hint">{CAMERA_HELP}</p>
-              </div>
-
+            <div className="camera-picker">
               {cameraOpen ? (
                 <div className="camera-live">
                   <video
@@ -790,81 +775,56 @@ export default function Home() {
                     </button>
                   </div>
                 </div>
-              ) : showDirectNativeInput ? (
-                <div className="camera-actions">
+              ) : (
+                <div className="capture-actions">
+                  <button
+                    type="button"
+                    className="capture-primary"
+                    onClick={handleOpenCamera}
+                    disabled={cameraBusy || loading || !canAddMorePhotos}
+                  >
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="capture-icon">
+                      <path d="M8.5 5.5 10 3.75h4l1.5 1.75H18A3 3 0 0 1 21 8.5v8A3 3 0 0 1 18 19.5H6a3 3 0 0 1-3-3v-8a3 3 0 0 1 3-3h2.5Z" />
+                      <circle cx="12" cy="12.5" r="3.25" />
+                    </svg>
+                    <span>{cameraBusy ? "Åbner kamera" : BUTTONS.takePhotos}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="capture-secondary"
+                    onClick={() => galleryInputRef.current?.click()}
+                    disabled={cameraBusy || loading || !canAddMorePhotos}
+                  >
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="capture-icon">
+                      <rect x="3" y="4" width="18" height="16" rx="2.5" />
+                      <circle cx="9" cy="9" r="1.5" />
+                      <path d="m5.5 17 4.25-4.25 3.25 3.25 2.25-2.25L19 17.5" />
+                    </svg>
+                    <span>{BUTTONS.useGallery}</span>
+                  </button>
+
                   <input
                     ref={nativeCameraInputRef}
+                    className="sr-only-input"
                     type="file"
                     accept="image/*"
                     capture="environment"
+                    tabIndex={-1}
                     disabled={cameraBusy || loading || !canAddMorePhotos}
                     onChange={(event) => handlePickedFiles(Array.from(event.target.files || []))}
                   />
-
-                  {canUseLiveCamera ? (
-                    <button
-                      type="button"
-                      className="quiet-button"
-                      onClick={handleOpenCamera}
-                      disabled={cameraBusy || loading || !canAddMorePhotos}
-                    >
-                      {cameraBusy ? "Åbner kamera" : "Prøv live kamera"}
-                    </button>
-                  ) : null}
 
                   <input
                     ref={galleryInputRef}
+                    className="sr-only-input"
                     type="file"
                     accept="image/*"
                     multiple
+                    tabIndex={-1}
                     disabled={cameraBusy || loading || !canAddMorePhotos}
                     onChange={(event) => handlePickedFiles(Array.from(event.target.files || []))}
                   />
-                </div>
-              ) : (
-                <div className="camera-actions">
-                  <label
-                    className="cta-button picker-fallback"
-                    style={FILE_TRIGGER_LABEL_STYLE}
-                  >
-                    <span>Brug telefonens kamera</span>
-                    <input
-                      ref={nativeCameraInputRef}
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      style={FILE_TRIGGER_INPUT_STYLE}
-                      disabled={cameraBusy || loading || !canAddMorePhotos}
-                      onChange={(event) => handlePickedFiles(Array.from(event.target.files || []))}
-                    />
-                  </label>
-
-                  {canUseLiveCamera ? (
-                    <button
-                      type="button"
-                      className="quiet-button"
-                      onClick={handleOpenCamera}
-                      disabled={cameraBusy || loading || !canAddMorePhotos}
-                    >
-                      {cameraBusy ? "Åbner kamera" : "Prøv live kamera"}
-                    </button>
-                  ) : null}
-
-                  <label
-                    className="quiet-button picker-fallback"
-                    style={FILE_TRIGGER_LABEL_STYLE}
-                  >
-                    <span>{BUTTONS.useGallery}</span>
-                    <input
-                      ref={galleryInputRef}
-                      type="file"
-                      accept="image/*"
-                      multiple
-                      style={FILE_TRIGGER_INPUT_STYLE}
-                      disabled={cameraBusy || loading || !canAddMorePhotos}
-                      onChange={(event) => handlePickedFiles(Array.from(event.target.files || []))}
-                    />
-                  </label>
                 </div>
               )}
               {cameraError ? <p className="camera-error">{cameraError}</p> : null}
@@ -891,17 +851,21 @@ export default function Home() {
               ) : null}
             </div>
 
-            <button
-              type="button"
-              className="cta-button"
-              onClick={handleScan}
-              disabled={loading || files.length === 0}
-            >
-              {loading ? LOADING_HEADLINE : BUTTONS.inspectPhotos}
-            </button>
+            {files.length > 0 ? (
+              <button
+                type="button"
+                className="cta-button scan-submit"
+                onClick={handleScan}
+                disabled={loading}
+              >
+                {loading ? LOADING_HEADLINE : BUTTONS.inspectPhotos}
+              </button>
+            ) : null}
           </div>
 
-          <p className="helper-text">{fileSummary(files.length)}</p>
+          <p className="helper-text">
+            {files.length > 0 ? fileSummary(files.length) : SCAN_REASSURANCE}
+          </p>
 
           {status ? (
             <div className="status-banner" role="status">
@@ -910,6 +874,7 @@ export default function Home() {
             </div>
           ) : null}
 
+          {hasScanResult ? (
           <div className="editor-grid">
             <section className="editor-card">
               <div className="section-head">
@@ -1077,6 +1042,7 @@ export default function Home() {
               )}
             </section>
           </div>
+          ) : null}
         </section>
 
         {currentAnswer && showRecipe ? (
