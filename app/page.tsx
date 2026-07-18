@@ -2,22 +2,26 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import AnswerCard from "../components/AnswerCard";
+import FoodIllustration from "../components/FoodIllustration";
+import Onboarding from "../components/Onboarding";
 import {
+  HOME_COPY,
   BUTTONS,
   CAMERA_FALLBACK,
   EMPTY_PANTRY,
   LOADING_HEADLINE,
-  ONBOARDING_LEAD,
   OUT_OF_IDEAS,
   REVIEW_OPTIONAL_HEADING,
   REVIEW_OPTIONAL_SUB,
-  SCAN_LEAD,
   SCAN_REASSURANCE,
   SCAN_STATUS,
   SCAN_TIPS,
   addedToList,
   alreadyOnList,
+  allergySummary,
   fileSummary,
+  goalLabel,
+  peopleLabel,
   scanErrorMessage,
   statusLine,
 } from "../lib/copy";
@@ -30,6 +34,12 @@ import {
 import { DEFAULT_HOUSEHOLD } from "../lib/household";
 import { buildIngredientRegistry, normalizeIngredientLookup } from "../lib/ingredientRegistry";
 import { buildAnswer, filterCandidates, rankFallback, type RankedRecipe } from "../lib/matcher";
+import {
+  ONBOARDING_STORAGE_KEY,
+  parseOnboardingProfile,
+  profileToHousehold,
+  type OnboardingProfile,
+} from "../lib/onboarding";
 import { allApprovedRecipes } from "../lib/recipes/recipeEngine";
 import {
   ACCEPTED_CONFIDENCE_CUTOFF,
@@ -43,8 +53,6 @@ const MAX_FRAMES = 4;
 const MAX_IMAGE_DIMENSION = 1280; // P1: klientkomprimering (Vercel-grænse ~4,5 MB)
 const JPEG_QUALITY = 0.72;
 const APPROVED_RECIPES = allApprovedRecipes();
-const HOUSEHOLD_PROFILE = DEFAULT_HOUSEHOLD;
-const CANDIDATE_RECIPES = filterCandidates(APPROVED_RECIPES, HOUSEHOLD_PROFILE);
 const INGREDIENT_REGISTRY = buildIngredientRegistry();
 
 type ScanRouteResponse = {
@@ -161,12 +169,17 @@ function createPantry(items: PantryItem[], lastScanAt: string, previous: Pantry 
   };
 }
 
-function buildSuggestionDeck(pantry: Pantry, now: Date) {
+function buildSuggestionDeck(
+  pantry: Pantry,
+  now: Date,
+  candidateRecipes: ReturnType<typeof filterCandidates>,
+  householdProfile: typeof DEFAULT_HOUSEHOLD
+) {
   return applyEveningRule(
     rankFallback(
-      CANDIDATE_RECIPES,
+      candidateRecipes,
       pantry,
-      HOUSEHOLD_PROFILE,
+      householdProfile,
       pantry.deductions,
       now.toISOString()
     ),
@@ -276,6 +289,7 @@ export default function Home() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const recipeRef = useRef<HTMLElement | null>(null);
+  const scanPanelRef = useRef<HTMLElement | null>(null);
 
   const [files, setFiles] = useState<File[]>([]);
   const [draftItems, setDraftItems] = useState<PantryItem[]>([]);
@@ -291,6 +305,18 @@ export default function Home() {
   const [touchLikeDevice, setTouchLikeDevice] = useState(false);
   const [showRecipe, setShowRecipe] = useState(false);
   const [suggestionState, setSuggestionState] = useState(createInitialSuggestionState());
+  const [profileLoaded, setProfileLoaded] = useState(false);
+  const [onboardingProfile, setOnboardingProfile] = useState<OnboardingProfile | null>(null);
+  const [editingProfile, setEditingProfile] = useState(false);
+
+  const householdProfile = useMemo(
+    () => onboardingProfile ? profileToHousehold(onboardingProfile) : DEFAULT_HOUSEHOLD,
+    [onboardingProfile]
+  );
+  const candidateRecipes = useMemo(
+    () => filterCandidates(APPROVED_RECIPES, householdProfile),
+    [householdProfile]
+  );
 
   const groupedItems = useMemo(() => {
     const sorted = sortDraftItems(draftItems).map((item, index) => ({ item, index }));
@@ -300,7 +326,9 @@ export default function Home() {
     };
   }, [draftItems]);
 
-  const suggestionDeck = committedPantry ? buildSuggestionDeck(committedPantry, new Date()) : [];
+  const suggestionDeck = committedPantry
+    ? buildSuggestionDeck(committedPantry, new Date(), candidateRecipes, householdProfile)
+    : [];
   const currentIndex = suggestionDeck.length > 0
     ? Math.min(suggestionState.cursor, suggestionDeck.length - 1)
     : 0;
@@ -337,6 +365,14 @@ export default function Home() {
 
   useEffect(() => {
     setTouchLikeDevice(isTouchLikeDevice());
+  }, []);
+
+  useEffect(() => {
+    const savedProfile = parseOnboardingProfile(
+      window.localStorage.getItem(ONBOARDING_STORAGE_KEY)
+    );
+    setOnboardingProfile(savedProfile);
+    setProfileLoaded(true);
   }, []);
 
   useEffect(() => {
@@ -507,7 +543,12 @@ export default function Home() {
    *  sig selv, brugeren skal aldrig trykke "foreslå" (produktloven). */
   function commitAndSuggest(items: PantryItem[], seenAt: string) {
     const pantry = createPantry(items, seenAt, committedPantry);
-    const deck = buildSuggestionDeck(pantry, new Date());
+    const deck = buildSuggestionDeck(
+      pantry,
+      new Date(),
+      candidateRecipes,
+      householdProfile
+    );
 
     setCommittedPantry(pantry);
     setSuggestionState(createInitialSuggestionState());
@@ -547,6 +588,14 @@ export default function Home() {
     }
 
     setStatus(SCAN_STATUS.photoAdded);
+  }
+
+  function handleCompleteOnboarding(profile: OnboardingProfile) {
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify(profile));
+    setOnboardingProfile(profile);
+    setEditingProfile(false);
+    setSuggestionState(createInitialSuggestionState());
+    setShowRecipe(false);
   }
 
   function resetAll() {
@@ -713,24 +762,89 @@ export default function Home() {
   );
   const hasScanResult = Boolean(lastScanAt || draftItems.length || committedPantry);
 
+  if (!profileLoaded) {
+    return (
+      <main className="profile-loading" aria-label="Indlæser FridgeMap">
+        <span className="mini-brand-mark">FM</span>
+      </main>
+    );
+  }
+
+  if (!onboardingProfile || editingProfile) {
+    return (
+      <Onboarding
+        initialProfile={editingProfile ? onboardingProfile : null}
+        onComplete={handleCompleteOnboarding}
+        onCancel={onboardingProfile ? () => setEditingProfile(false) : undefined}
+      />
+    );
+  }
+
   return (
-    <main className="page-shell">
-      <div className="page-header">
-        <div className="brand-mark">FM</div>
-        <div className="brand-copy">
-          <p className="kicker">FridgeMap</p>
-          <h1>Tag billeder af køleskabet. Få ét godt bud til aftensmad.</h1>
-          <p className="lead">{ONBOARDING_LEAD}</p>
+    <main className={`page-shell${hasRoundActivity ? " page-shell--active" : ""}`}>
+      <header className="app-topbar">
+        <div className="mini-brand" aria-label="FridgeMap">
+          <span className="mini-brand-mark">FM</span>
+          <span>FridgeMap</span>
         </div>
-      </div>
+
+        <button type="button" className="profile-button" onClick={() => setEditingProfile(true)}>
+          <span className="profile-button-dot" aria-hidden="true" />
+          {HOME_COPY.savedProfile}
+        </button>
+      </header>
 
       <div className="page-body">
-        <section className={`scan-panel${hasRoundActivity ? "" : " scan-panel--intro"}`}>
+        {!hasRoundActivity ? (
+          <section className="home-hero">
+            <div className="home-hero-copy">
+              <p className="kicker">{HOME_COPY.eyebrow}</p>
+              <h1>{HOME_COPY.headline}</h1>
+              <p className="home-lead">{HOME_COPY.lead}</p>
+
+              <div className="profile-chips" aria-label="Din profil">
+                <span>{peopleLabel(onboardingProfile.people)}</span>
+                <span>{goalLabel(onboardingProfile.goals[0])}</span>
+                <span>{allergySummary(onboardingProfile.allergies)}</span>
+              </div>
+
+              <p className="home-promise">{HOME_COPY.promise}</p>
+
+              <button
+                type="button"
+                className="home-scan-button"
+                onClick={() => scanPanelRef.current?.scrollIntoView({ behavior: "smooth" })}
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24" className="capture-icon">
+                  <path d="M8.5 5.5 10 3.75h4l1.5 1.75H18A3 3 0 0 1 21 8.5v8A3 3 0 0 1 18 19.5H6a3 3 0 0 1-3-3v-8a3 3 0 0 1 3-3h2.5Z" />
+                  <circle cx="12" cy="12.5" r="3.25" />
+                </svg>
+                {HOME_COPY.scanCta}
+              </button>
+            </div>
+
+            <div className="home-hero-visual">
+              <FoodIllustration compact />
+              <div className="home-visual-note">
+                <span className="home-visual-number">01</span>
+                <div>
+                  <strong>Se, hvad du har</strong>
+                  <small>Så finder vi det bedste sted at starte.</small>
+                </div>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        <section
+          ref={scanPanelRef}
+          className={`scan-panel${hasRoundActivity ? "" : " scan-panel--intro"}`}
+        >
           <div className="panel-heading">
             <div>
-              <p className="panel-label">Kig i køleskabet</p>
-              <h2>Tag 2–4 billeder</h2>
-              <p className="scan-lead">{SCAN_LEAD}</p>
+              <p className="panel-label">{HOME_COPY.scanEyebrow}</p>
+              <h2>{HOME_COPY.scanHeadline}</h2>
+              <p className="scan-lead">{HOME_COPY.scanLead}</p>
               <ul className="scan-tips">
                 {SCAN_TIPS.map((tip) => (
                   <li key={tip}>{tip}</li>
