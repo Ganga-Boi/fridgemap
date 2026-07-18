@@ -2,7 +2,109 @@
  * COPY — tonekontrakten. Al brugerrettet tekst bor her.
  */
 
-import type { Answer } from "../types/contracts";
+import type { OnboardingGoal } from "./onboarding";
+import type { Allergen, Answer } from "../types/contracts";
+
+export const HOME_COPY = {
+  eyebrow: "Din personlige madassistent",
+  headline: "Hvad kan vi lave med det, du allerede har?",
+  lead: "Tag et par billeder. FridgeMap finder varerne og giver dig ét konkret bud til aftensmad.",
+  promise: "Brug det, du har. Spis godt. Smid mindre ud.",
+  scanEyebrow: "Start her",
+  scanHeadline: "Vis mig, hvad du har",
+  scanLead: "Tag 2–4 billeder af køleskab, skabe eller de madvarer, du vil bruge.",
+  scanCta: "Scan mine madvarer",
+  savedProfile: "Tilpas",
+} as const;
+
+export const ONBOARDING_COPY = {
+  welcomeEyebrow: "Mindre spild. Mere aftensmad.",
+  welcomeHeadline: "Brug det, du har. Spis godt. Smid mindre ud.",
+  welcomeLead:
+    "FridgeMap ser dine madvarer og finder retter, der passer til det, du allerede har hjemme.",
+  welcomeNote: "Det tager under ét minut at komme i gang.",
+  benefits: ["Færre ekstra indkøb", "Mindre madspild", "Ét klart bud"],
+  start: "Kom i gang",
+  goalHeadline: "Hvad skal FridgeMap hjælpe dig med?",
+  goalLead: "Dine valg former de forslag, du får.",
+  peopleHeadline: "Hvor mange spiser oftest med?",
+  peopleLead: "Så kan vi give forslag, der passer til jeres hverdag.",
+  allergyHeadline: "Er der noget, vi altid skal undgå?",
+  allergyLead: "Valgte allergener bliver filtreret helt fra.",
+  finishHeadline: "Din FridgeMap er klar.",
+  finishLead: "Nu mangler vi bare at se, hvad du har hjemme.",
+  finish: "Se min forside",
+} as const;
+
+export const GOAL_OPTIONS: {
+  value: OnboardingGoal;
+  label: string;
+  description: string;
+  icon: string;
+}[] = [
+  {
+    value: "use_what_i_have",
+    label: "Brug det, jeg allerede har",
+    description: "Find retter ud fra dine egne madvarer",
+    icon: "◎",
+  },
+  {
+    value: "reduce_waste",
+    label: "Undgå madspild",
+    description: "Få brugt varerne, før de bliver glemt",
+    icon: "↻",
+  },
+  {
+    value: "save_money",
+    label: "Spare penge",
+    description: "Køb kun det, der faktisk mangler",
+    icon: "kr.",
+  },
+  {
+    value: "quick_meals",
+    label: "Få hurtige måltider",
+    description: "Kom lettere fra køleskab til aftensmad",
+    icon: "↗",
+  },
+  {
+    value: "eat_healthier",
+    label: "Spise sundere",
+    description: "Få bedre overblik over dine råvarer",
+    icon: "+",
+  },
+  {
+    value: "more_protein",
+    label: "Få mere protein",
+    description: "Find de proteinrige muligheder først",
+    icon: "P",
+  },
+];
+
+export const ALLERGY_OPTIONS: { value: Allergen; label: string }[] = [
+  { value: "gluten", label: "Gluten" },
+  { value: "laktose", label: "Laktose" },
+  { value: "nødder", label: "Nødder" },
+  { value: "æg", label: "Æg" },
+  { value: "fisk", label: "Fisk" },
+  { value: "skaldyr", label: "Skaldyr" },
+  { value: "soja", label: "Soja" },
+];
+
+export function peopleLabel(people: number): string {
+  return people === 1 ? "1 person" : `${people} personer`;
+}
+
+export function goalLabel(goal: OnboardingGoal): string {
+  return GOAL_OPTIONS.find((option) => option.value === goal)?.label ?? "Personlige forslag";
+}
+
+export function allergySummary(allergies: Allergen[]): string {
+  if (allergies.length === 0) return "Ingen allergier";
+  if (allergies.length === 1) {
+    return ALLERGY_OPTIONS.find((option) => option.value === allergies[0])?.label ?? "1 hensyn";
+  }
+  return `${allergies.length} allergihensyn`;
+}
 
 export function dateEyebrow(now: Date): string {
   return now

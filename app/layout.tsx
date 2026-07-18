@@ -13,7 +13,7 @@ const body = Source_Sans_3({
 
 export const metadata = {
   title: "FridgeMap",
-  description: "Tag et billede af køleskabet og få forslag til retter og manglende ingredienser.",
+  description: "Brug det, du har. Få et konkret bud til aftensmad og mindre madspild.",
   manifest: "/manifest.json",
 };
 
